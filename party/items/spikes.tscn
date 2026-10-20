@@ -1,0 +1,21 @@
+[gd_scene format=3]
+
+[ext_resource type="Texture2D" path="res://party/art/spikes.webp" id="1_tex"]
+[ext_resource type="Script" path="res://party/hazard.gd" id="2_haz"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_s"]
+size = Vector2(60, 22)
+
+[node name="Spikes" type="Node2D"]
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture_filter = 1
+scale = Vector2(2, 2)
+texture = ExtResource("1_tex")
+
+[node name="Hazard" type="Area2D" parent="."]
+script = ExtResource("2_haz")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Hazard"]
+position = Vector2(0, 2)
+shape = SubResource("RectangleShape2D_s")

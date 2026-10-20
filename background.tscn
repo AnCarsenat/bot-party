@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://dfptdsg70617d"]
+
+[ext_resource type="Texture2D" uid="uid://cd0okg3gouu14" path="res://tile.webp" id="1_tile"]
+
+[node name="Background" type="Parallax2D" unique_id=2059739696]
+z_index = -1000
+scroll_scale = Vector2(0.5, 0.5)
+repeat_size = Vector2(2560, 2560)
+repeat_times = 2
+
+[node name="Tiles" type="Sprite2D" parent="." unique_id=1268150174]
+modulate = Color(0.6, 0.6, 0.67, 0.45)
+texture_filter = 1
+texture_repeat = 2
+scale = Vector2(2.5, 2.5)
+texture = ExtResource("1_tile")
+region_enabled = true
+region_rect = Rect2(0, 0, 1024, 1024)

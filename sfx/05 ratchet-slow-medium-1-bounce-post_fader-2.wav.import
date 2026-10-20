@@ -1,0 +1,24 @@
+[remap]
+
+importer="wav"
+type="AudioStreamWAV"
+uid="uid://dyp5t2rre1g15"
+path="res://.godot/imported/05 ratchet-slow-medium-1-bounce-post_fader-2.wav-ec504ea8c27191c7d8496d5c6e349967.sample"
+
+[deps]
+
+source_file="res://sfx/05 ratchet-slow-medium-1-bounce-post_fader-2.wav"
+dest_files=["res://.godot/imported/05 ratchet-slow-medium-1-bounce-post_fader-2.wav-ec504ea8c27191c7d8496d5c6e349967.sample"]
+
+[params]
+
+force/8_bit=false
+force/mono=false
+force/max_rate=false
+force/max_rate_hz=44100
+edit/trim=false
+edit/normalize=false
+edit/loop_mode=0
+edit/loop_begin=0
+edit/loop_end=-1
+compress/mode=2

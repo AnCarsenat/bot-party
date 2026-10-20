@@ -1,0 +1,310 @@
+[gd_scene format=3 uid="uid://bctrjvouhla7p"]
+
+[ext_resource type="PackedScene" path="res://background.tscn" id="bg_tiles"]
+[ext_resource type="Script" uid="uid://bsu31ifa3nnoq" path="res://synced_polygon.gd" id="1_bhpv2"]
+[ext_resource type="PackedScene" uid="uid://blxolv4dh1s5x" path="res://button.tscn" id="1_n2bu5"]
+[ext_resource type="PackedScene" uid="uid://bk6boi628qfdv" path="res://player.tscn" id="1_thia8"]
+[ext_resource type="Script" uid="uid://b1laxalobnpte" path="res://camera_script.gd" id="2_lolil"]
+[ext_resource type="Script" uid="uid://uiuvdbtjqr2y" path="res://game.gd" id="3_1q0j8"]
+[ext_resource type="PackedScene" path="res://platform.tscn" id="4_tglp"]
+[ext_resource type="PackedScene" uid="uid://ckn7wes5shl61" path="res://door.tscn" id="5_door"]
+[ext_resource type="PackedScene" path="res://trampoline.tscn" id="6_tramp"]
+[ext_resource type="PackedScene" path="res://crate.tscn" id="7_crate"]
+[ext_resource type="Script" path="res://logic/prolongator.gd" id="8_prolong"]
+[ext_resource type="Script" path="res://logic/logic_gate.gd" id="9_gate"]
+[ext_resource type="Script" path="res://logic/clock.gd" id="10_clock"]
+[ext_resource type="Script" path="res://logic/randomizer.gd" id="11_random"]
+[ext_resource type="Script" path="res://player_spawner.gd" id="12_spawn"]
+[ext_resource type="Script" path="res://player_count_filter.gd" id="13_filter"]
+
+[node name="Map1" type="Node2D" unique_id=1719321166]
+
+[node name="Background" parent="." instance=ExtResource("bg_tiles")]
+
+[node name="Map" type="Node" parent="." unique_id=154980805]
+
+[node name="StaticBody2D2" type="StaticBody2D" parent="Map" unique_id=1152479054]
+position = Vector2(675, 186)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/StaticBody2D2" unique_id=1764173041]
+polygon = PackedVector2Array(-31, -55, 43, -55, 42, 33, -34, 32)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/StaticBody2D2" unique_id=1487639835]
+polygon = PackedVector2Array(-31, -55, 43, -55, 42, 33, -34, 32)
+script = ExtResource("1_bhpv2")
+
+[node name="StaticBody2D5" type="StaticBody2D" parent="Map" unique_id=342308963]
+position = Vector2(228, -642)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/StaticBody2D5" unique_id=884144584]
+polygon = PackedVector2Array(-31, -55, 43, -55, 42, 33, -34, 32)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/StaticBody2D5" unique_id=263149355 node_paths=PackedStringArray("collision")]
+polygon = PackedVector2Array(-31, -55, 43, -55, 42, 33, -34, 32)
+script = ExtResource("1_bhpv2")
+collision = NodePath("../CollisionPolygon2D")
+
+[node name="StaticBody2D3" type="StaticBody2D" parent="Map" unique_id=1668359754]
+position = Vector2(846, 87)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/StaticBody2D3" unique_id=956051534]
+polygon = PackedVector2Array(-31, -55, 43, -55, 42, 33, -34, 32)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/StaticBody2D3" unique_id=1333102980]
+polygon = PackedVector2Array(-31, -55, 43, -55, 42, 33, -34, 32)
+script = ExtResource("1_bhpv2")
+
+[node name="StaticBody2D4" type="StaticBody2D" parent="Map" unique_id=1736091043]
+position = Vector2(543, -189)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/StaticBody2D4" unique_id=1478762704]
+polygon = PackedVector2Array(-337, -55, 43, -55, 42, 33, -320, 30)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/StaticBody2D4" unique_id=831299918]
+polygon = PackedVector2Array(-337, -55, 43, -55, 42, 33, -320, 30)
+script = ExtResource("1_bhpv2")
+
+[node name="StaticBody2D" type="StaticBody2D" parent="Map" unique_id=559573351]
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/StaticBody2D" unique_id=1911460431]
+position = Vector2(539, 343)
+polygon = PackedVector2Array(-364.5, -45, 364.5, -45, 364.5, 45, -364.5, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/StaticBody2D" unique_id=506169426]
+position = Vector2(539, 343)
+polygon = PackedVector2Array(-364.5, -45, 364.5, -45, 364.5, 45, -364.5, 45)
+script = ExtResource("1_bhpv2")
+
+[node name="Button" parent="Map" unique_id=306633277 instance=ExtResource("1_n2bu5")]
+position = Vector2(493.99997, -287.99997)
+
+[node name="Button2" parent="Map" unique_id=381744735 instance=ExtResource("1_n2bu5")]
+position = Vector2(237, -741)
+
+[node name="Bridge" parent="Map" unique_id=1148023944 node_paths=PackedStringArray("inputs") instance=ExtResource("4_tglp")]
+position = Vector2(670, -125)
+inputs = [NodePath("../Button")]
+
+[node name="Bridge2" parent="Map" unique_id=1148023943 node_paths=PackedStringArray("inputs") instance=ExtResource("4_tglp")]
+position = Vector2(366, -448)
+inputs = [NodePath("../Button2")]
+
+[node name="GateTimer" type="RigidBody2D" parent="Map" unique_id=900000101 node_paths=PackedStringArray("inputs")]
+position = Vector2(860, 250)
+script = ExtResource("8_prolong")
+duration = 8.0
+inputs = [NodePath("../Button")]
+
+[node name="Gate1" parent="Map" unique_id=900000102 node_paths=PackedStringArray("inputs") instance=ExtResource("4_tglp")]
+position = Vector2(960, -176)
+size = Vector2(30, 948)
+inverted = true
+inputs = [NodePath("../GateTimer")]
+
+[node name="Floor2" type="StaticBody2D" parent="Map" unique_id=900000103]
+position = Vector2(1301.5, 343)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/Floor2" unique_id=900000104]
+polygon = PackedVector2Array(-398.5, -45, 398.5, -45, 398.5, 45, -398.5, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/Floor2" unique_id=900000105]
+polygon = PackedVector2Array(-398.5, -45, 398.5, -45, 398.5, 45, -398.5, 45)
+script = ExtResource("1_bhpv2")
+
+[node name="Trampoline" parent="Map" unique_id=900000106 instance=ExtResource("6_tramp")]
+position = Vector2(1200, 298)
+
+[node name="Ledge2" type="StaticBody2D" parent="Map" unique_id=900000107]
+position = Vector2(1495, -105)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/Ledge2" unique_id=900000108]
+polygon = PackedVector2Array(-45, -45, 45, -45, 45, 45, -45, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/Ledge2" unique_id=900000109]
+polygon = PackedVector2Array(-45, -45, 45, -45, 45, 45, -45, 45)
+script = ExtResource("1_bhpv2")
+
+[node name="Ledge2Notch" type="StaticBody2D" parent="Map" unique_id=900000300]
+position = Vector2(1580, -75)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/Ledge2Notch" unique_id=900000301]
+polygon = PackedVector2Array(-40, -15, 40, -15, 40, 15, -40, 15)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/Ledge2Notch" unique_id=900000302]
+polygon = PackedVector2Array(-40, -15, 40, -15, 40, 15, -40, 15)
+script = ExtResource("1_bhpv2")
+
+[node name="Ledge2b" type="StaticBody2D" parent="Map" unique_id=900000310]
+position = Vector2(1860, -105)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/Ledge2b" unique_id=900000311]
+polygon = PackedVector2Array(-240, -45, 240, -45, 240, 45, -240, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/Ledge2b" unique_id=900000312]
+polygon = PackedVector2Array(-240, -45, 240, -45, 240, 45, -240, 45)
+script = ExtResource("1_bhpv2")
+
+[node name="Crate" parent="Map" unique_id=900000110 instance=ExtResource("7_crate")]
+position = Vector2(1720, -185)
+
+[node name="CrateButton" parent="Map" unique_id=900000111 instance=ExtResource("1_n2bu5")]
+position = Vector2(1580, -134.7)
+color = Color(0.35, 0.85, 0.4, 1)
+
+[node name="Gate2" parent="Map" unique_id=900000112 node_paths=PackedStringArray("inputs") instance=ExtResource("4_tglp")]
+position = Vector2(1880, -475)
+size = Vector2(30, 650)
+inverted = true
+inputs = [NodePath("../CrateButton")]
+
+[node name="Mover" parent="Map" unique_id=900000113 instance=ExtResource("4_tglp")]
+position = Vector2(2250, -135)
+size = Vector2(160, 30)
+move_offset = Vector2(450, 0)
+move_time = 2.5
+pause_time = 0.8
+
+[node name="Clock" type="RigidBody2D" parent="Map" unique_id=900000114]
+position = Vector2(1960, -190)
+script = ExtResource("10_clock")
+period = 1.0
+on_time = 0.2
+mass = 8.0
+
+[node name="Randomizer" type="RigidBody2D" parent="Map" unique_id=900000115 node_paths=PackedStringArray("inputs")]
+position = Vector2(2045, -190)
+script = ExtResource("11_random")
+chance = 0.5
+pulse_length = 1.5
+mass = 8.0
+inputs = [NodePath("../Clock")]
+
+[node name="BonusStep" parent="Map" unique_id=900000116 node_paths=PackedStringArray("inputs") instance=ExtResource("4_tglp")]
+position = Vector2(2475, -360)
+size = Vector2(120, 30)
+inputs = [NodePath("../Randomizer")]
+
+[node name="Ledge3" type="StaticBody2D" parent="Map" unique_id=900000117]
+position = Vector2(3050, -105)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/Ledge3" unique_id=900000118]
+polygon = PackedVector2Array(-250, -45, 250, -45, 250, 45, -250, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/Ledge3" unique_id=900000119]
+polygon = PackedVector2Array(-250, -45, 250, -45, 250, 45, -250, 45)
+script = ExtResource("1_bhpv2")
+
+[node name="ButtonD1" parent="Map" unique_id=900000120 instance=ExtResource("1_n2bu5")]
+position = Vector2(2880, -194.7)
+color = Color(0.3, 0.55, 0.95, 1)
+
+[node name="OneWay1" parent="Map" unique_id=900000121 instance=ExtResource("4_tglp")]
+position = Vector2(3100, -315)
+size = Vector2(200, 30)
+one_way = true
+
+[node name="OneWay2" parent="Map" unique_id=900000122 instance=ExtResource("4_tglp")]
+position = Vector2(3280, -495)
+size = Vector2(200, 30)
+one_way = true
+
+[node name="Ledge4" type="StaticBody2D" parent="Map" unique_id=900000123]
+position = Vector2(3600, -645)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/Ledge4" unique_id=900000124]
+polygon = PackedVector2Array(-200, -45, 200, -45, 200, 45, -200, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/Ledge4" unique_id=900000125]
+polygon = PackedVector2Array(-200, -45, 200, -45, 200, 45, -200, 45)
+script = ExtResource("1_bhpv2")
+
+[node name="WallEnd" type="StaticBody2D" parent="Map" unique_id=900000126]
+position = Vector2(3830, -800)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Map/WallEnd" unique_id=900000127]
+polygon = PackedVector2Array(-30, -150, 30, -150, 30, 150, -30, 150)
+
+[node name="Polygon2D" type="Polygon2D" parent="Map/WallEnd" unique_id=900000128]
+polygon = PackedVector2Array(-30, -150, 30, -150, 30, 150, -30, 150)
+script = ExtResource("1_bhpv2")
+
+[node name="ButtonD2" parent="Map" unique_id=900000129 instance=ExtResource("1_n2bu5")]
+position = Vector2(3480, -734.7)
+color = Color(0.98, 0.78, 0.25, 1)
+
+[node name="DoorTimer" type="RigidBody2D" parent="Map" unique_id=900000131 node_paths=PackedStringArray("inputs")]
+position = Vector2(3090, -190)
+script = ExtResource("8_prolong")
+duration = 12.0
+mass = 8.0
+inputs = [NodePath("../Coop/BothButtons"), NodePath("../SoloOnly/BothButtonsSolo")]
+
+[node name="FinishDoor" parent="Map" unique_id=900000132 node_paths=PackedStringArray("inputs") instance=ExtResource("5_door")]
+position = Vector2(3720, -754)
+inputs = [NodePath("../DoorTimer")]
+
+[node name="Coop" type="Node2D" parent="Map" unique_id=900000400]
+script = ExtResource("13_filter")
+min_players = 2
+
+[node name="BothButtons" type="RigidBody2D" parent="Map/Coop" unique_id=900000130 node_paths=PackedStringArray("inputs")]
+position = Vector2(2990, -190)
+script = ExtResource("9_gate")
+type = 0
+mass = 8.0
+inputs = [NodePath("../../ButtonD1"), NodePath("../../ButtonD2")]
+
+[node name="SoloOnly" type="Node2D" parent="Map" unique_id=900000401]
+script = ExtResource("13_filter")
+max_players = 1
+
+[node name="SoloStep1" parent="Map/SoloOnly" unique_id=900000402 instance=ExtResource("4_tglp")]
+position = Vector2(120, 140)
+size = Vector2(160, 30)
+one_way = true
+
+[node name="SoloStep2" parent="Map/SoloOnly" unique_id=900000403 instance=ExtResource("4_tglp")]
+position = Vector2(60, -60)
+size = Vector2(160, 30)
+one_way = true
+
+[node name="ButtonD1Hold" type="RigidBody2D" parent="Map/SoloOnly" unique_id=900000404 node_paths=PackedStringArray("inputs")]
+position = Vector2(2940, -190)
+script = ExtResource("8_prolong")
+duration = 25.0
+mass = 8.0
+inputs = [NodePath("../../ButtonD1")]
+
+[node name="BothButtonsSolo" type="RigidBody2D" parent="Map/SoloOnly" unique_id=900000405 node_paths=PackedStringArray("inputs")]
+position = Vector2(3020, -190)
+script = ExtResource("9_gate")
+type = 0
+mass = 8.0
+inputs = [NodePath("../ButtonD1Hold"), NodePath("../../ButtonD2")]
+
+[node name="PlayerSpawner" type="Node2D" parent="." unique_id=900000406]
+position = Vector2(250, 230)
+script = ExtResource("12_spawn")
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=905631554 node_paths=PackedStringArray("game_manager")]
+zoom = Vector2(0.8, 0.8)
+script = ExtResource("2_lolil")
+game_manager = NodePath("../Game")
+boundary_left = -600.0
+boundary_right = 4400.0
+boundary_bottom = 1000.0
+
+[node name="Game" type="Node" parent="." unique_id=147870182]
+script = ExtResource("3_1q0j8")

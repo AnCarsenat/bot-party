@@ -1,0 +1,27 @@
+[gd_scene format=3 uid="uid://blxolv4dh1s5x"]
+
+[ext_resource type="Script" uid="uid://cedy3njern5mj" path="res://button.gd" id="1_r04n3"]
+[ext_resource type="Texture2D" path="res://button_base.webp" id="2_base"]
+[ext_resource type="Texture2D" path="res://button_cap.webp" id="3_cap"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_jxcdy"]
+size = Vector2(88, 44)
+
+[node name="Button" type="Area2D" unique_id=381744735]
+script = ExtResource("1_r04n3")
+
+[node name="Cap" type="Sprite2D" parent="." unique_id=296294935]
+z_index = -101
+texture_filter = 1
+scale = Vector2(3.4375, 3.4375)
+texture = ExtResource("3_cap")
+
+[node name="Base" type="Sprite2D" parent="." unique_id=296294934]
+z_index = -100
+texture_filter = 1
+scale = Vector2(3.4375, 3.4375)
+texture = ExtResource("2_base")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=1985652470]
+position = Vector2(0, 22)
+shape = SubResource("RectangleShape2D_jxcdy")
