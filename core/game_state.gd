@@ -180,6 +180,11 @@ func go_to_menu(message := "") -> void:
 	current_level = -1
 	campaign_id = ""
 	get_tree().paused = false
+	var party := get_tree().root.get_node_or_null("Party")
+	if party and party.return_to_editor:
+		party.return_to_editor = false  # was testing a map: back to the editor
+		_transition().change_scene("res://editor/map_editor.tscn")
+		return
 	_transition().change_scene("res://ui/main_menu.tscn", message, 2.0 if message != "" else 0.0)
 
 

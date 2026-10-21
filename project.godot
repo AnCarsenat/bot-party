@@ -21,6 +21,7 @@ buses/default_bus_layout="res://audio/default_bus_layout.tres"
 
 [autoload]
 
+Mods="*res://mods/mods.gd"
 DebugView="*res://core/debug_view.gd"
 AmbientSfx="*res://audio/ambient_sfx.tscn"
 Music="*res://audio/music_player.gd"
@@ -340,5 +341,6 @@ p8_action_3={
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
+
 rendering_device/driver.windows="d3d12"
 environment/defaults/default_clear_color=Color(0.47, 0.47, 0.53, 1)

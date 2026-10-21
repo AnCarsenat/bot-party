@@ -220,7 +220,7 @@ func _hello(who: String, local_slots: Array) -> void:
 	# Bring the newcomer to where we are.
 	var scene := get_tree().current_scene
 	if scene and scene.scene_file_path != "":
-		_load_scene.rpc_id(id, scene.scene_file_path, "", 0.0, _scene_token)
+		_load_scene.rpc_id(id, scene.scene_file_path, "", 0.0, _scene_token, _scene_extra(scene.scene_file_path))
 		_welcome.call_deferred(id)
 
 
@@ -524,7 +524,7 @@ func allow_scene_change(path: String, message: String, message_time: float) -> b
 	if is_host():
 		_scene_token += 1
 		_reset_sync()
-		_load_scene.rpc(path, message, message_time, _scene_token)
+		_load_scene.rpc(path, message, message_time, _scene_token, _scene_extra(path))
 		if _lobby.registered():
 			_lobby.heartbeat.call_deferred(roster.size(), _mode_text())
 		return true
@@ -534,12 +534,21 @@ func allow_scene_change(path: String, message: String, message_time: float) -> b
 
 
 @rpc("authority", "call_remote", "reliable")
-func _load_scene(path: String, message: String, message_time: float, token: int) -> void:
+func _load_scene(path: String, message: String, message_time: float, token: int, extra := {}) -> void:
 	_scene_token = token
+	if extra.has("map"):
+		Party.session["map"] = extra.map  # custom arena: build the host's map
 	_reset_sync()
 	_applying = true
 	get_tree().root.get_node("Transition").change_scene(path, message, message_time)
 	_applying = false
+
+
+## What a client needs to load `path` like the host (the map of a custom arena).
+func _scene_extra(path: String) -> Dictionary:
+	if path == ArenaMap.SCENE:
+		return {"map": Party.session.get("map", {})}
+	return {}
 
 
 # --- Per frame ---------------------------------------------------------------------

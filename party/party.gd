@@ -8,6 +8,7 @@ const SAVE_PATH := "user://party_session.json"
 ## Arenas a party can be played in (one is picked at random for each new party).
 const ARENAS := ["res://party/party_arena.tscn", "res://party/party_arena_2.tscn",
 	"res://party/party_arena_3.tscn", "res://party/party_arena_4.tscn"]
+const ARENA_NAMES := ["Steps", "Pillar", "Windy heights", "Meteor field"]
 const POINTS_COIN := 5
 const POINTS_FINISH := 10
 const POINTS_FIRST := 5
@@ -102,24 +103,74 @@ func save_weights() -> void:
 	var cfg := ConfigFile.new()
 	for k in weights:
 		cfg.set_value("weights", k, weights[k])
+	cfg.set_value("party", "arena", arena_choice)
 	cfg.save(ITEMS_PATH)
 
 
 func load_weights() -> void:
 	weights.clear()
 	var cfg := ConfigFile.new()
+	if cfg.load(ITEMS_PATH) == OK:
+		arena_choice = str(cfg.get_value("party", "arena", "random"))
 	if cfg.load(ITEMS_PATH) == OK and cfg.has_section("weights"):
 		for k in cfg.get_section_keys("weights"):
 			if ITEMS.has(k):
 				weights[k] = clampi(int(cfg.get_value("weights", k)), 0, MAX_WEIGHT)
 
 
-func new_session(players: Array) -> void:
+## Which arena new parties use: "random", a built-in arena path, or "map:<file>".
+var arena_choice := "random"
+## Set while testing a map from the editor: going back to the menu returns there.
+var return_to_editor := false
+
+
+func new_session(players: Array, choice := "") -> void:
 	var scores := {}
 	for s in players:
 		scores[str(s)] = 0
 	session = {"round": 1, "scores": scores, "players": players.duplicate(), "items": [],
 		"arena": ARENAS[randi() % ARENAS.size()]}
+	if choice == "":
+		choice = arena_choice
+	if choice.begins_with("map:"):
+		var m := ArenaMap.load_file(choice.trim_prefix("map:"))
+		if not m.is_empty():
+			use_map(m)
+	elif choice in ARENAS:
+		session.arena = choice
+
+
+## The party is played on a map from the editor.
+func use_map(m: Dictionary) -> void:
+	session.arena = ArenaMap.SCENE
+	session.map = m
+
+
+## Arena choices for the menu: [{id, name}].
+func arena_options() -> Array:
+	var out := [{"id": "random", "name": "Random"}]
+	for i in ARENAS.size():
+		out.append({"id": ARENAS[i], "name": ARENA_NAMES[i]})
+	for m in ArenaMap.list_all():
+		out.append({"id": "map:" + m.path, "name": m.name + ("  (mod)" if m.mod else "")})
+	return out
+
+
+func arena_choice_name() -> String:
+	for o in arena_options():
+		if o.id == arena_choice:
+			return o.name
+	arena_choice = "random"
+	return "Random"
+
+
+## Plays a map straight from the editor (comes back to the editor afterwards).
+func test_map(m: Dictionary) -> void:
+	new_session(GameState.joined, "random")
+	use_map(m)
+	session["editing"] = true  # not saved: "Continue" keeps your real party
+	return_to_editor = true
+	get_tree().root.get_node("Transition").change_scene(ArenaMap.SCENE, m.name, 0.8)
 
 
 func new_game() -> void:
@@ -175,8 +226,8 @@ func describe_save() -> String:
 
 
 func save() -> void:
-	if NetCheck.client(self):
-		return  # online: the host keeps the party
+	if NetCheck.client(self) or session.get("editing", false):
+		return  # online: the host keeps the party / testing a map: keep the real save
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f:
 		f.store_string(JSON.stringify(session, "  "))

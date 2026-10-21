@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://editor/map_editor.gd" id="1"]
+[ext_resource type="PackedScene" path="res://levels/background.tscn" id="bg"]
+
+[node name="MapEditor" type="Node2D"]
+script = ExtResource("1")
+
+[node name="Background" parent="." instance=ExtResource("bg")]
+z_index = -10

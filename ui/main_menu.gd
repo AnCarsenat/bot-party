@@ -6,7 +6,7 @@ extends Control
 ## "Players" is the lobby: each player presses their own jump key to join.
 
 const TITLE := "Bot Party"
-const VERSION := "v0.23"
+const VERSION := "v0.24"
 const NAV_REPEAT := 0.16  # seconds between moves when a pad stick is held
 const LIST_TOP := 24.0
 const ROW_STEP := 66.0     # row height + separation
@@ -193,7 +193,14 @@ func _show(screen: String, keep_index := false) -> void:
 				"info": "First to %d wins." % Party.TARGET_SCORE})
 			if Party.has_save():
 				_items.append({"text": "Continue", "on_accept": func(): _start(func(): Party.continue_game()), "info": Party.describe_save()})
+			_items.append({"text": "Arena", "info": "Left / right: where new parties are played.\nYour own maps are listed too.",
+				"value": func(): return Party.arena_choice_name().left(12),
+				"on_left": func(): _cycle_arena(-1), "on_right": func(): _cycle_arena(1),
+				"on_accept": func(): _cycle_arena(1)})
 			_items.append({"text": "Items", "on_accept": func(): _show("party_items"), "info": "Which items show up, and how often."})
+			if not Net.is_online():
+				_items.append({"text": "Map editor", "on_accept": func(): get_tree().root.get_node("Transition").change_scene("res://editor/map_editor.tscn"),
+					"info": "Draw your own arenas (mouse). Saved maps show up under Arena."})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"party_items":
 			for id in Party.ITEMS:
@@ -450,6 +457,17 @@ func _toggle(key: String) -> void:
 
 # --- Input --------------------------------------------------------------------
 
+func _cycle_arena(step: int) -> void:
+	var options := Party.arena_options()
+	var i := 0
+	for k in options.size():
+		if options[k].id == Party.arena_choice:
+			i = k
+	Party.arena_choice = options[posmod(i + step, options.size())].id
+	Party.save_weights()
+	_refresh_info()
+
+
 func _start(action: Callable) -> void:
 	if GameState.joined.is_empty():
 		_show("players")
@@ -631,6 +649,8 @@ class _Row extends Control:
 					var r := Rect2(vx + k * 17, 22, 13, 22)
 					draw_rect(r, UiTheme.LIVE if k < roundi(v * 10) else UiTheme.MARBLE)
 					draw_rect(r, UiTheme.INK, false, 3.0)
+		elif item.has("value") and item.value.call() is String:
+			draw_string(UiTheme.FONT_MEDIUM, Vector2(VALUE_X, 46), "< %s >" % item.value.call(), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, UiTheme.INK)
 		elif item.has("value"):
 			var val: Dictionary = item.value.call()
 			var bar: float = val.bar

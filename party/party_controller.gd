@@ -128,7 +128,10 @@ func clear_items() -> int:
 
 ## Online client: the host runs the party; we build the UI and show its state.
 func _ready_client() -> void:
+	var map = Party.session.get("map")
 	Party.session = {"round": 1, "scores": {}, "players": [], "items": [], "arena": scene_file()}
+	if map:
+		Party.session.map = map  # custom arena from the host
 	_goal.collision_layer = 0
 	_goal.collision_mask = 0
 	_build_ui()

@@ -1,0 +1,59 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://party/custom_arena.gd" id="arena"]
+[ext_resource type="PackedScene" path="res://levels/background.tscn" id="bg"]
+[ext_resource type="Script" path="res://core/camera_script.gd" id="camera"]
+[ext_resource type="Script" path="res://core/game.gd" id="game"]
+[ext_resource type="Script" path="res://player/player_spawner.gd" id="spawner"]
+[ext_resource type="Script" path="res://party/party_controller.gd" id="controller"]
+[ext_resource type="Texture2D" path="res://party/art/flag.webp" id="flag"]
+[ext_resource type="Script" path="res://party/arena_weather.gd" id="weather"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_goal"]
+size = Vector2(90, 130)
+
+[node name="CustomArena" type="Node2D"]
+script = ExtResource("arena")
+
+[node name="Background" parent="." instance=ExtResource("bg")]
+
+[node name="Level" type="Node2D" parent="."]
+
+[node name="Goal" type="Area2D" parent="."]
+monitorable = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Goal"]
+shape = SubResource("RectangleShape2D_goal")
+
+[node name="Flag" type="Sprite2D" parent="Goal"]
+texture_filter = 1
+position = Vector2(0, -4)
+scale = Vector2(2.5, 2.5)
+texture = ExtResource("flag")
+
+[node name="Items" type="Node2D" parent="."]
+
+[node name="PlayerSpawner" type="Node2D" parent="."]
+script = ExtResource("spawner")
+allow_drop_in = false
+auto_spawn = false
+
+[node name="Camera2D" type="Camera2D" parent="." node_paths=PackedStringArray("game_manager")]
+zoom = Vector2(0.4, 0.4)
+script = ExtResource("camera")
+follow_speed = 3.0
+game_manager = NodePath("../Game")
+max_zoom = 0.6
+min_zoom = 0.28
+zoom_margin = Vector2(900, 650)
+
+[node name="Game" type="Node" parent="."]
+script = ExtResource("game")
+restart_when_all_out = false
+
+[node name="PartyController" type="Node" parent="."]
+script = ExtResource("controller")
+round_time = 55.0
+
+[node name="Weather" type="Node2D" parent="."]
+script = ExtResource("weather")
