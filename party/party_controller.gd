@@ -256,8 +256,7 @@ func _sync_ghosts(list: Array) -> void:
 			snapped.erase(slot)
 		cursor[slot] = e[6]
 		var ok := can_place(e[1], g.global_position, e[3])
-		var c: Color = PlayerSpawner.COLORS[(slot - 1) % 8]
-		g.modulate = Color(c.r, c.g, c.b, 0.75) if ok else Color(1, 0.3, 0.3, 0.6)
+		g.modulate = Color(1, 1, 1, 0.85) if ok else Color(1, 0.35, 0.35, 0.6)
 	for slot in ghosts.keys():
 		if not seen.has(slot):
 			if ghosts[slot] != null and is_instance_valid(ghosts[slot]):
@@ -687,8 +686,7 @@ func _process_place(delta: float) -> void:
 		orient(g, turns[slot], mirrors[slot])
 		var id: String = g.get_meta("item_id")
 		var ok := can_place(id, g.global_position, turns[slot])
-		var c: Color = PlayerSpawner.COLORS[(slot - 1) % 8]
-		g.modulate = Color(c.r, c.g, c.b, 0.75) if ok else Color(1, 0.3, 0.3, 0.6)
+		g.modulate = Color(1, 1, 1, 0.85) if ok else Color(1, 0.35, 0.35, 0.6)
 		if ok and _pressed(slot, "action_1"):
 			_place(slot)
 	if all_done:
@@ -824,7 +822,9 @@ func _update_ghost_tags() -> void:
 		if not _ghost_tags.has(slot):
 			var tag := VBoxContainer.new()
 			tag.alignment = BoxContainer.ALIGNMENT_CENTER
-			tag.add_child(UiTheme.player_chip(slot))
+			var chip := UiTheme.player_chip(slot)
+			chip.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+			tag.add_child(chip)
 			var keys := Label.new()
 			var k := Net.local_keys_for(slot)
 			if k != 0:
@@ -918,43 +918,94 @@ func _update_box() -> void:
 	for c in _box_row.get_children():
 		c.queue_free()
 	for i in box.size():
-		var def: Dictionary = Party.ITEMS[box[i]]
-		var card := PanelContainer.new()
-		card.custom_minimum_size = Vector2(140, 160)
-		card.add_theme_stylebox_override("panel", UiTheme.frame("crate"))
-		var v := VBoxContainer.new()
-		v.alignment = BoxContainer.ALIGNMENT_CENTER
-		card.add_child(v)
-		var icon := TextureRect.new()
-		icon.texture = load(def.icon)
-		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		icon.custom_minimum_size = Vector2(80, 64)
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		v.add_child(icon)
-		var title := Label.new()
-		title.text = def.name
-		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		title.add_theme_font_override("font", UiTheme.FONT_MEDIUM)
-		title.add_theme_font_size_override("font_size", 22)
-		v.add_child(title)
-		var who := HBoxContainer.new()
-		who.alignment = BoxContainer.ALIGNMENT_CENTER
-		v.add_child(who)
-		var taker := 0
+		var card := _Card.new()
+		card.item = box[i]
 		for s in picks:
 			if picks[s] == i:
-				taker = s
-		if taker:
-			card.modulate = Color(1, 1, 1, 0.45)
-			who.add_child(UiTheme.player_chip(taker))
-		else:
-			for s in cursors:
-				if not picks.has(s) and cursors[s] == i:
-					who.add_child(UiTheme.player_chip(s))
-			if who.get_child_count() > 0:
-				card.add_theme_stylebox_override("panel", UiTheme.frame("lime"))
+				card.taker = s
+		if card.taker == 0:
+			for s in slots:
+				if cursors.get(s, -1) == i and not picks.has(s):
+					card.hovering.append(s)
 		_box_row.add_child(card)
+
+
+## One item in the pick box. Who is on it is shown by shape, not just colour:
+## each hovering player gets their own ring (stacked) and their robot standing on
+## top with their number; a picked card is greyed out with the picker's robot
+## sitting on it and a big tick.
+class _Card extends Control:
+	const BODY := preload("res://player/player_body.webp")
+	const FACE := preload("res://player/player_face.webp")
+	var item := ""
+	var taker := 0
+	var hovering: Array = []
+	var _t := 0.0
+	# Kept here: a texture loaded inside _draw() would be freed before it's drawn.
+	var _icon: Texture2D
+	var _frame_lime := UiTheme.frame("lime")
+	var _frame_crate := UiTheme.frame("crate")
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(150, 236)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _process(delta: float) -> void:
+		_t += delta
+		queue_redraw()
+
+	func _robot(at: Vector2, slot: int, size: float, frame: int) -> void:
+		var r := Rect2(at - Vector2(size / 2.0, size), Vector2(size, size))
+		var src := Rect2(frame * 32, 0, 32, 32)
+		draw_texture_rect_region(BODY, r, src, PlayerSpawner.COLORS[(slot - 1) % 8])
+		draw_texture_rect_region(FACE, r, src)
+
+	func _tag(at: Vector2, slot: int) -> void:
+		var text := "P%d" % slot
+		var w := UiTheme.FONT_BOLD.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x + 14
+		var r := Rect2(at - Vector2(w / 2.0, 0), Vector2(w, 24))
+		draw_rect(r, PlayerSpawner.COLORS[(slot - 1) % 8])
+		draw_rect(r, UiTheme.INK, false, 3.0)
+		draw_string(UiTheme.FONT_BOLD, r.position + Vector2(7, 18), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18, UiTheme.INK)
+
+	func _draw() -> void:
+		var def: Dictionary = Party.ITEMS[item]
+		var lift := -10.0 if not hovering.is_empty() else 0.0
+		var card := Rect2(Vector2(6, 64 + lift), Vector2(size.x - 12, 160))
+		# Rings: one per hovering player, stacked outwards, in their colour.
+		for k in hovering.size():
+			var grow := 5.0 + k * 7.0
+			var r := card.grow(grow)
+			draw_rect(r, UiTheme.INK, false, 9.0)
+			draw_rect(r, PlayerSpawner.COLORS[(hovering[k] - 1) % 8], false, 5.0)
+		draw_style_box(_frame_lime if not hovering.is_empty() else _frame_crate, card)
+		# Icon and name.
+		if _icon == null:
+			_icon = load(def.icon)
+		var icon := _icon
+		var ir := Rect2(card.position + Vector2((card.size.x - 80) / 2.0, 14), Vector2(80, 80))
+		draw_texture_rect(icon, ir, false, Color(1, 1, 1, 0.35) if taker else Color.WHITE)
+		var font: Font = UiTheme.FONT_MEDIUM
+		var fs := 20 if def.name.length() <= 10 else 16
+		draw_string(font, card.position + Vector2(0, 124), def.name, HORIZONTAL_ALIGNMENT_CENTER, card.size.x, fs,
+			UiTheme.INK if not taker else Color("8a8796"))
+		if taker:
+			# Picked: big tick in the picker's colour, their robot sitting on top.
+			var c: Color = PlayerSpawner.COLORS[(taker - 1) % 8]
+			var mid := card.get_center() + Vector2(0, -16)
+			var pts := PackedVector2Array([mid + Vector2(-26, 0), mid + Vector2(-8, 18), mid + Vector2(28, -22)])
+			draw_polyline(pts, UiTheme.INK, 16.0)
+			draw_polyline(pts, c, 9.0)
+			_robot(Vector2(card.get_center().x, card.position.y + 6), taker, 56, 0)
+			_tag(Vector2(card.get_center().x, card.end.y + 6), taker)
+			return
+		# Hovering players' robots stand on the card, side by side, bobbing a little.
+		var n := hovering.size()
+		for k in n:
+			var x := card.get_center().x + (k - (n - 1) / 2.0) * 44.0
+			var bob := absf(sin(_t * 6.0 + k)) * -5.0
+			_robot(Vector2(x, card.position.y + 6 + bob), hovering[k], 48, 0)
+			_tag(Vector2(x, card.end.y + 8), hovering[k])
 
 
 func _add_tag(parent: Control, slot: int, text: String) -> void:
