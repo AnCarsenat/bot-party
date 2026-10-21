@@ -13,6 +13,7 @@ var _log: RichTextLabel
 var _line: LineEdit
 var _toasts: VBoxContainer
 var _fps: Label
+var _keys: _KeyTester
 var _history: Array[String] = []
 var _history_pos := 0
 var _paused_by_us := false
@@ -80,6 +81,15 @@ func _build() -> void:
 	_fps.hide()
 	root.add_child(_fps)
 
+	_keys = _KeyTester.new()
+	_keys.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	_keys.offset_left = -470
+	_keys.offset_right = -16
+	_keys.offset_top = -170
+	_keys.offset_bottom = 214
+	_keys.hide()
+	root.add_child(_keys)
+
 
 func is_open() -> bool:
 	return _panel.visible
@@ -101,6 +111,8 @@ func toggle(open: bool) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if _keys.visible and (event is InputEventKey or event is InputEventJoypadButton) and event.is_pressed():
+		_keys.last = _describe(event)
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode in TOGGLE_KEYS or event.keycode in TOGGLE_KEYS:
 			toggle(not is_open())
@@ -218,7 +230,7 @@ func _say(text: String) -> String:
 
 
 ## Commands anyone can use online (the rest change the game: host only).
-const FOR_EVERYONE := ["help", "clear", "fps", "debug", "items", "where", "confetti", "net", "say", "name"]
+const FOR_EVERYONE := ["keys", "help", "clear", "fps", "debug", "items", "where", "confetti", "net", "say", "name"]
 
 
 func _add(name: String, usage: String, help: String, fn: Callable) -> void:
@@ -272,6 +284,12 @@ func _register_all() -> void:
 		return "\n".join(lines))
 	_add("clear", "clear", "Clear this log.", func(_a): _log.clear(); return "")
 	_add("fps", "fps", "Show / hide FPS (and ping online).", func(_a): _fps.visible = not _fps.visible; return "")
+	_add("keys", "keys", "Key tester: every player's keys light up when the game receives them.", func(_a):
+		_keys.visible = not _keys.visible
+		if _keys.visible:
+			toggle(false)
+			return "Key tester on (type keys again to hide it). Press each player's keys: a box that never lights means that key never reaches the game."
+		return "Key tester off")
 	_add("debug", "debug", "Show / hide logic wires and arrows (same as F3).", func(_a):
 		var dv := get_tree().root.get_node_or_null("DebugView")
 		if dv:
@@ -457,3 +475,46 @@ func _register_all() -> void:
 		Net.player_name = " ".join(a).left(16)
 		Net.save_config()
 		return "You are %s" % Net.player_name)
+
+
+func _describe(e: InputEvent) -> String:
+	if e is InputEventKey:
+		var phys := OS.get_keycode_string(e.physical_keycode) if e.physical_keycode else "?"
+		var typed := OS.get_keycode_string(e.keycode) if e.keycode else "?"
+		return "key %s (physical %s)" % [typed, phys]
+	if e is InputEventJoypadButton:
+		return "pad %d button %d" % [e.device, e.button_index]
+	return ""
+
+
+## Live view of every player's actions (console "keys").
+class _KeyTester extends PanelContainer:
+	const NAMES := ["left", "right", "up", "down", "jump", "turn", "flip"]
+	var last := ""
+
+	func _ready() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _process(_d: float) -> void:
+		if visible:
+			queue_redraw()
+
+	func _draw() -> void:
+		var y := 26.0
+		draw_string(UiTheme.FONT_BOLD, Vector2(18, y), "Key tester", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, UiTheme.INK)
+		draw_string(UiTheme.FONT_REGULAR, Vector2(150, y), last, HORIZONTAL_ALIGNMENT_LEFT, 280, 16, UiTheme.MUTED)
+		for slot in range(1, 9):
+			y = 30.0 + slot * 38.0
+			var joined := GameState.is_joined(slot)
+			draw_string(UiTheme.FONT_BOLD, Vector2(18, y + 20), "P%d" % slot, HORIZONTAL_ALIGNMENT_LEFT, -1, 20,
+				UiTheme.INK if joined else Color("9a97a6"))
+			for i in NAMES.size():
+				var action := "p%d_%s" % [slot, Net.ACTIONS[i]]
+				var on := InputMap.has_action(action) and Input.is_action_pressed(action)
+				var r := Rect2(62 + i * 54, y, 50, 28)
+				# Lit = dark box (not just a colour: P1 is white).
+				draw_rect(r, UiTheme.INK if on else UiTheme.MARBLE)
+				draw_rect(r, UiTheme.INK, false, 2.0)
+				var tc: Color = PlayerSpawner.COLORS[(slot - 1) % 8] if on else UiTheme.INK
+				draw_string(UiTheme.FONT_BOLD if on else UiTheme.FONT_MEDIUM, r.position + Vector2(0, 20), NAMES[i],
+					HORIZONTAL_ALIGNMENT_CENTER, r.size.x, 14, tc)
