@@ -36,7 +36,7 @@ func _on_inputs_changed() -> void:
 
 
 func _default_texture() -> Texture2D:
-	return preload("res://gate.webp")
+	return preload("res://logic/gate.webp")
 
 
 ## The gate type is gameplay information, so it is always printed on the sprite.

@@ -94,12 +94,17 @@ static func player_chip(slot: int, faded := false) -> PanelContainer:
 
 ## The key a player jumps with, as text ("Space", "N", "Pad 1 A").
 static func jump_key_text(n: int) -> String:
-	var name := "p%d_action_1" % n
+	return action_key_text(n, 1)
+
+
+## The key for a player's action 1, 2 or 3 ("Space", "E", "Pad 1 X").
+static func action_key_text(n: int, action: int) -> String:
+	var name := "p%d_action_%d" % [n, action]
 	if not InputMap.has_action(name):
 		return "-"
 	for ev in InputMap.action_get_events(name):
 		if ev is InputEventJoypadButton:
-			return "Pad %d A" % (ev.device + 1)
+			return "Pad %d %s" % [ev.device + 1, ["A", "B", "X", "Y"][clampi(ev.button_index, 0, 3)]]
 		return _event_text(ev)
 	return "-"
 

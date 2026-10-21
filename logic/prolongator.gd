@@ -32,7 +32,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _default_texture() -> Texture2D:
-	return preload("res://prolongator.webp")
+	return preload("res://logic/prolongator.webp")
 
 
 func _label() -> PackedStringArray:

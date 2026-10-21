@@ -4,14 +4,17 @@
 [ext_resource type="Script" path="res://party/hazard.gd" id="2_haz"]
 [ext_resource type="Script" path="res://party/saw.gd" id="3_saw"]
 
-[sub_resource type="CircleShape2D" id="CircleShape2D_s"]
-radius = 26.0
+[sub_resource type="CircleShape2D" id="CircleShape2D_solid"]
+radius = 22.0
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_hurt"]
+radius = 31.0
 
 [node name="Saw" type="Node2D"]
 script = ExtResource("3_saw")
 
-[node name="Blade" type="Area2D" parent="."]
-script = ExtResource("2_haz")
+[node name="Blade" type="AnimatableBody2D" parent="."]
+sync_to_physics = false
 
 [node name="Sprite2D" type="Sprite2D" parent="Blade"]
 texture_filter = 1
@@ -19,4 +22,10 @@ scale = Vector2(2, 2)
 texture = ExtResource("1_tex")
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Blade"]
-shape = SubResource("CircleShape2D_s")
+shape = SubResource("CircleShape2D_solid")
+
+[node name="Hazard" type="Area2D" parent="Blade"]
+script = ExtResource("2_haz")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Blade/Hazard"]
+shape = SubResource("CircleShape2D_hurt")

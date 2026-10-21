@@ -71,6 +71,10 @@ func _ready() -> void:
 	if Engine.is_editor_hint():
 		return
 	add_to_group(MACHINE_GROUP)
+	add_to_group("net_sync")
+	if NetCheck.client(self):
+		freeze_mode = RigidBody2D.FREEZE_MODE_KINEMATIC
+		freeze = true  # online: placed where the host says
 	if not show_in_game:
 		hide()
 	Wires.attach(self)
@@ -80,7 +84,11 @@ func _ready() -> void:
 	_on_inputs_changed()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if _net_target != Vector2.INF:  # online client: glide to where the host has it
+		var k := 1.0 - exp(-25.0 * delta)
+		global_position = global_position.lerp(_net_target, k)
+		rotation = lerp_angle(rotation, _net_rot, k)
 	# Wires must follow objects that move (being pushed, falling...).
 	if debug_visible(self):
 		queue_redraw()
@@ -160,6 +168,8 @@ func _progress() -> float:
 func set_output(value: bool) -> void:
 	if value == is_pressed:
 		return
+	if NetCheck.client(self) and not NetCheck.applying(self):
+		return  # online: outputs come from the host (timers, randomizer...)
 	is_pressed = value
 	if is_pressed and is_inside_tree():
 		# Little "pop" when switching on.
@@ -172,6 +182,24 @@ func set_output(value: bool) -> void:
 	else:
 		released.emit()
 	queue_redraw()
+
+
+func net_state() -> Array:
+	return [is_pressed, Vector2i(global_position.round()), snappedf(rotation, 0.01)]
+
+
+var _net_target := Vector2.INF
+var _net_rot := 0.0
+
+
+func net_apply(s: Array) -> void:
+	set_output(s[0])
+	var pos := Vector2(s[1])
+	if _net_target == Vector2.INF or global_position.distance_to(pos) > 200.0:
+		global_position = pos
+		rotation = s[2]
+	_net_target = pos
+	_net_rot = s[2]
 
 
 func _on_any_input_toggled(_state: bool) -> void:

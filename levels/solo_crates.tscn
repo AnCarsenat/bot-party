@@ -1,0 +1,102 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://levels/background.tscn" id="bg"]
+[ext_resource type="Script" path="res://objects/synced_polygon.gd" id="sync"]
+[ext_resource type="PackedScene" path="res://objects/button.tscn" id="button"]
+[ext_resource type="PackedScene" path="res://objects/platform.tscn" id="platform"]
+[ext_resource type="PackedScene" path="res://objects/door.tscn" id="door"]
+[ext_resource type="Script" path="res://core/camera_script.gd" id="camera"]
+[ext_resource type="Script" path="res://core/game.gd" id="game"]
+[ext_resource type="Script" path="res://player/player_spawner.gd" id="spawner"]
+[ext_resource type="Script" path="res://logic/prolongator.gd" id="prolong"]
+[ext_resource type="Script" path="res://logic/delayer.gd" id="delayer"]
+[ext_resource type="Script" path="res://logic/logic_gate.gd" id="gate"]
+[ext_resource type="Script" path="res://logic/clock.gd" id="clock"]
+[ext_resource type="PackedScene" path="res://objects/crate.tscn" id="crate"]
+[ext_resource type="PackedScene" path="res://objects/trampoline.tscn" id="tramp"]
+[ext_resource type="PackedScene" path="res://party/items/spikes.tscn" id="spikes"]
+[ext_resource type="PackedScene" path="res://party/items/saw.tscn" id="saw"]
+
+[node name="SoloCrates" type="Node2D" unique_id=970000018]
+
+[node name="Background" parent="." unique_id=970000019 instance=ExtResource("bg")]
+
+[node name="Level" type="Node2D" parent="." unique_id=970000020]
+
+[node name="Floor" type="StaticBody2D" parent="Level" unique_id=970000001]
+position = Vector2(900, 345)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/Floor" unique_id=970000002]
+polygon = PackedVector2Array(-1100, -45, 1100, -45, 1100, 45, -1100, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/Floor" unique_id=970000003]
+polygon = PackedVector2Array(-1100, -45, 1100, -45, 1100, 45, -1100, 45)
+script = ExtResource("sync")
+
+[node name="WallLeft" type="StaticBody2D" parent="Level" unique_id=970000004]
+position = Vector2(-230, 0)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/WallLeft" unique_id=970000005]
+polygon = PackedVector2Array(-30, -345, 30, -345, 30, 345, -30, 345)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/WallLeft" unique_id=970000006]
+polygon = PackedVector2Array(-30, -345, 30, -345, 30, 345, -30, 345)
+script = ExtResource("sync")
+
+[node name="Plateau" type="StaticBody2D" parent="Level" unique_id=970000007]
+position = Vector2(1500, 175)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/Plateau" unique_id=970000008]
+polygon = PackedVector2Array(-500, -125, 500, -125, 500, 125, -500, 125)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/Plateau" unique_id=970000009]
+polygon = PackedVector2Array(-500, -125, 500, -125, 500, 125, -500, 125)
+script = ExtResource("sync")
+
+[node name="WallRight" type="StaticBody2D" parent="Level" unique_id=970000010]
+position = Vector2(2030, -200)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/WallRight" unique_id=970000011]
+polygon = PackedVector2Array(-30, -300, 30, -300, 30, 300, -30, 300)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/WallRight" unique_id=970000012]
+polygon = PackedVector2Array(-30, -300, 30, -300, 30, 300, -30, 300)
+script = ExtResource("sync")
+
+[node name="CrateA" parent="Level" unique_id=970000013 instance=ExtResource("crate")]
+position = Vector2(300, 268)
+
+[node name="CrateB" parent="Level" unique_id=970000014 instance=ExtResource("crate")]
+position = Vector2(820, 268)
+
+[node name="DoorButton" parent="Level" unique_id=970000015 instance=ExtResource("button")]
+position = Vector2(600, 255.3)
+color = Color(0.98, 0.78, 0.25, 1)
+
+[node name="Spikes" parent="Level" unique_id=970000016 instance=ExtResource("spikes")]
+position = Vector2(1350, 34)
+
+[node name="ExitDoor" parent="Level" unique_id=970000017 node_paths=PackedStringArray("inputs") instance=ExtResource("door")]
+position = Vector2(1880, -14)
+reach = 150.0
+inputs = [NodePath("../DoorButton")]
+
+[node name="PlayerSpawner" type="Node2D" parent="." unique_id=970000021]
+position = Vector2(0, 230)
+script = ExtResource("spawner")
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=970000022 node_paths=PackedStringArray("game_manager")]
+zoom = Vector2(0.8, 0.8)
+script = ExtResource("camera")
+game_manager = NodePath("../Game")
+boundary_left = -500
+boundary_right = 2300
+boundary_top = -2000.0
+boundary_bottom = 1000
+
+[node name="Game" type="Node" parent="." unique_id=970000023]
+script = ExtResource("game")

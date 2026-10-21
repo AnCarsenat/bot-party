@@ -1,0 +1,134 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://levels/background.tscn" id="bg"]
+[ext_resource type="Script" path="res://objects/synced_polygon.gd" id="sync"]
+[ext_resource type="PackedScene" path="res://objects/button.tscn" id="button"]
+[ext_resource type="PackedScene" path="res://objects/platform.tscn" id="platform"]
+[ext_resource type="PackedScene" path="res://objects/door.tscn" id="door"]
+[ext_resource type="Script" path="res://core/camera_script.gd" id="camera"]
+[ext_resource type="Script" path="res://core/game.gd" id="game"]
+[ext_resource type="Script" path="res://player/player_spawner.gd" id="spawner"]
+[ext_resource type="Script" path="res://logic/prolongator.gd" id="prolong"]
+[ext_resource type="Script" path="res://logic/delayer.gd" id="delayer"]
+[ext_resource type="Script" path="res://logic/logic_gate.gd" id="gate"]
+[ext_resource type="Script" path="res://logic/clock.gd" id="clock"]
+[ext_resource type="PackedScene" path="res://objects/crate.tscn" id="crate"]
+[ext_resource type="PackedScene" path="res://objects/trampoline.tscn" id="tramp"]
+[ext_resource type="PackedScene" path="res://party/items/spikes.tscn" id="spikes"]
+[ext_resource type="PackedScene" path="res://party/items/saw.tscn" id="saw"]
+
+[node name="Map3" type="Node2D" unique_id=930000027]
+
+[node name="Background" parent="." unique_id=930000028 instance=ExtResource("bg")]
+
+[node name="Level" type="Node2D" parent="." unique_id=930000029]
+
+[node name="FloorA" type="StaticBody2D" parent="Level" unique_id=930000001]
+position = Vector2(250, 345)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/FloorA" unique_id=930000002]
+polygon = PackedVector2Array(-450, -45, 450, -45, 450, 45, -450, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/FloorA" unique_id=930000003]
+polygon = PackedVector2Array(-450, -45, 450, -45, 450, 45, -450, 45)
+script = ExtResource("sync")
+
+[node name="WallLeft" type="StaticBody2D" parent="Level" unique_id=930000004]
+position = Vector2(-230, 0)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/WallLeft" unique_id=930000005]
+polygon = PackedVector2Array(-30, -345, 30, -345, 30, 345, -30, 345)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/WallLeft" unique_id=930000006]
+polygon = PackedVector2Array(-30, -345, 30, -345, 30, 345, -30, 345)
+script = ExtResource("sync")
+
+[node name="SpikesA" parent="Level" unique_id=930000007 instance=ExtResource("spikes")]
+position = Vector2(430, 286)
+
+[node name="SpikesB" parent="Level" unique_id=930000008 instance=ExtResource("spikes")]
+position = Vector2(494, 286)
+
+[node name="Mover" parent="Level" unique_id=930000009 instance=ExtResource("platform")]
+position = Vector2(770, 315)
+size = Vector2(140, 30)
+move_offset = Vector2(160, 0)
+move_time = 1.5
+pause_time = 0.6
+
+[node name="FloorB" type="StaticBody2D" parent="Level" unique_id=930000010]
+position = Vector2(1700, 345)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/FloorB" unique_id=930000011]
+polygon = PackedVector2Array(-700, -45, 700, -45, 700, 45, -700, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/FloorB" unique_id=930000012]
+polygon = PackedVector2Array(-700, -45, 700, -45, 700, 45, -700, 45)
+script = ExtResource("sync")
+
+[node name="Crate" parent="Level" unique_id=930000013 instance=ExtResource("crate")]
+position = Vector2(1150, 270)
+
+[node name="WallB" type="StaticBody2D" parent="Level" unique_id=930000014]
+position = Vector2(1500, 170)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/WallB" unique_id=930000015]
+polygon = PackedVector2Array(-50, -130, 50, -130, 50, 130, -50, 130)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/WallB" unique_id=930000016]
+polygon = PackedVector2Array(-50, -130, 50, -130, 50, 130, -50, 130)
+script = ExtResource("sync")
+
+[node name="Trampoline" parent="Level" unique_id=930000017 instance=ExtResource("tramp")]
+position = Vector2(1800, 300)
+
+[node name="HighLedge" type="StaticBody2D" parent="Level" unique_id=930000018]
+position = Vector2(2375, -155)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/HighLedge" unique_id=930000019]
+polygon = PackedVector2Array(-225, -45, 225, -45, 225, 45, -225, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/HighLedge" unique_id=930000020]
+polygon = PackedVector2Array(-225, -45, 225, -45, 225, 45, -225, 45)
+script = ExtResource("sync")
+
+[node name="SpikesC" parent="Level" unique_id=930000021 instance=ExtResource("spikes")]
+position = Vector2(2300, -214)
+
+[node name="SpikesD" parent="Level" unique_id=930000022 instance=ExtResource("spikes")]
+position = Vector2(2364, -214)
+
+[node name="WallRight" type="StaticBody2D" parent="Level" unique_id=930000023]
+position = Vector2(2630, -300)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/WallRight" unique_id=930000024]
+polygon = PackedVector2Array(-30, -690, 30, -690, 30, 690, -30, 690)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/WallRight" unique_id=930000025]
+polygon = PackedVector2Array(-30, -690, 30, -690, 30, 690, -30, 690)
+script = ExtResource("sync")
+
+[node name="ExitDoor" parent="Level" unique_id=930000026 instance=ExtResource("door")]
+position = Vector2(2520, -264)
+
+[node name="PlayerSpawner" type="Node2D" parent="." unique_id=930000030]
+position = Vector2(0, 230)
+script = ExtResource("spawner")
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=930000031 node_paths=PackedStringArray("game_manager")]
+zoom = Vector2(0.8, 0.8)
+script = ExtResource("camera")
+game_manager = NodePath("../Game")
+boundary_left = -500.0
+boundary_right = 2900.0
+boundary_top = -2000.0
+boundary_bottom = 1000.0
+
+[node name="Game" type="Node" parent="." unique_id=930000032]
+script = ExtResource("game")

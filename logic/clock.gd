@@ -38,7 +38,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _default_texture() -> Texture2D:
-	return preload("res://clock.webp")
+	return preload("res://logic/clock.webp")
 
 
 func _label() -> PackedStringArray:

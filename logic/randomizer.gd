@@ -50,7 +50,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _default_texture() -> Texture2D:
-	return preload("res://randomizer.webp")
+	return preload("res://logic/randomizer.webp")
 
 
 func _label() -> PackedStringArray:

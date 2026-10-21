@@ -1,0 +1,159 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://levels/background.tscn" id="bg"]
+[ext_resource type="Script" path="res://objects/synced_polygon.gd" id="sync"]
+[ext_resource type="Script" path="res://core/camera_script.gd" id="camera"]
+[ext_resource type="Script" path="res://core/game.gd" id="game"]
+[ext_resource type="Script" path="res://player/player_spawner.gd" id="spawner"]
+[ext_resource type="Script" path="res://party/party_controller.gd" id="controller"]
+[ext_resource type="Texture2D" path="res://party/art/flag.webp" id="flag"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_goal"]
+size = Vector2(90, 130)
+
+[node name="PartyArena2" type="Node2D" unique_id=960000037]
+
+[node name="Background" parent="." unique_id=960000038 instance=ExtResource("bg")]
+
+[node name="Level" type="Node2D" parent="." unique_id=960000001]
+
+[node name="Start" type="StaticBody2D" parent="Level" unique_id=960000002]
+position = Vector2(100, 645)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/Start" unique_id=960000003]
+polygon = PackedVector2Array(-150, -45, 150, -45, 150, 45, -150, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/Start" unique_id=960000004]
+polygon = PackedVector2Array(-150, -45, 150, -45, 150, 45, -150, 45)
+script = ExtResource("sync")
+
+[node name="WallLeft" type="StaticBody2D" parent="Level" unique_id=960000005]
+position = Vector2(-80, 100)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/WallLeft" unique_id=960000006]
+polygon = PackedVector2Array(-30, -590, 30, -590, 30, 590, -30, 590)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/WallLeft" unique_id=960000007]
+polygon = PackedVector2Array(-30, -590, 30, -590, 30, 590, -30, 590)
+script = ExtResource("sync")
+
+[node name="StepA" type="StaticBody2D" parent="Level" unique_id=960000008]
+position = Vector2(450, 520)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/StepA" unique_id=960000009]
+polygon = PackedVector2Array(-90, -20, 90, -20, 90, 20, -90, 20)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/StepA" unique_id=960000010]
+polygon = PackedVector2Array(-90, -20, 90, -20, 90, 20, -90, 20)
+script = ExtResource("sync")
+
+[node name="StepB" type="StaticBody2D" parent="Level" unique_id=960000011]
+position = Vector2(800, 420)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/StepB" unique_id=960000012]
+polygon = PackedVector2Array(-90, -20, 90, -20, 90, 20, -90, 20)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/StepB" unique_id=960000013]
+polygon = PackedVector2Array(-90, -20, 90, -20, 90, 20, -90, 20)
+script = ExtResource("sync")
+
+[node name="Pillar" type="StaticBody2D" parent="Level" unique_id=960000014]
+position = Vector2(1150, 400)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/Pillar" unique_id=960000015]
+polygon = PackedVector2Array(-60, -140, 60, -140, 60, 140, -60, 140)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/Pillar" unique_id=960000016]
+polygon = PackedVector2Array(-60, -140, 60, -140, 60, 140, -60, 140)
+script = ExtResource("sync")
+
+[node name="StepC" type="StaticBody2D" parent="Level" unique_id=960000017]
+position = Vector2(1500, 300)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/StepC" unique_id=960000018]
+polygon = PackedVector2Array(-90, -20, 90, -20, 90, 20, -90, 20)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/StepC" unique_id=960000019]
+polygon = PackedVector2Array(-90, -20, 90, -20, 90, 20, -90, 20)
+script = ExtResource("sync")
+
+[node name="StepD" type="StaticBody2D" parent="Level" unique_id=960000020]
+position = Vector2(1800, 200)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/StepD" unique_id=960000021]
+polygon = PackedVector2Array(-80, -20, 80, -20, 80, 20, -80, 20)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/StepD" unique_id=960000022]
+polygon = PackedVector2Array(-80, -20, 80, -20, 80, 20, -80, 20)
+script = ExtResource("sync")
+
+[node name="GoalPlatform" type="StaticBody2D" parent="Level" unique_id=960000023]
+position = Vector2(2100, 145)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/GoalPlatform" unique_id=960000024]
+polygon = PackedVector2Array(-150, -45, 150, -45, 150, 45, -150, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/GoalPlatform" unique_id=960000025]
+polygon = PackedVector2Array(-150, -45, 150, -45, 150, 45, -150, 45)
+script = ExtResource("sync")
+
+[node name="WallRight" type="StaticBody2D" parent="Level" unique_id=960000026]
+position = Vector2(2280, -200)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/WallRight" unique_id=960000027]
+polygon = PackedVector2Array(-30, -300, 30, -300, 30, 300, -30, 300)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/WallRight" unique_id=960000028]
+polygon = PackedVector2Array(-30, -300, 30, -300, 30, 300, -30, 300)
+script = ExtResource("sync")
+
+[node name="Goal" type="Area2D" parent="." unique_id=960000029]
+position = Vector2(2120, 36)
+monitorable = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Goal" unique_id=960000030]
+shape = SubResource("RectangleShape2D_goal")
+
+[node name="Flag" type="Sprite2D" parent="Goal" unique_id=960000031]
+texture_filter = 1
+position = Vector2(0, -4)
+scale = Vector2(2.5, 2.5)
+texture = ExtResource("flag")
+
+[node name="Items" type="Node2D" parent="." unique_id=960000032]
+
+[node name="PlayerSpawner" type="Node2D" parent="." unique_id=960000033]
+position = Vector2(20, 550)
+script = ExtResource("spawner")
+allow_drop_in = false
+auto_spawn = false
+
+[node name="Camera2D" type="Camera2D" parent="." unique_id=960000034 node_paths=PackedStringArray("game_manager")]
+position = Vector2(1100, 250)
+zoom = Vector2(0.5, 0.5)
+script = ExtResource("camera")
+follow_speed = 0.0
+game_manager = NodePath("../Game")
+boundary_left = -400.0
+boundary_right = 2600.0
+boundary_bottom = 1000.0
+dynamic_zoom = false
+
+[node name="Game" type="Node" parent="." unique_id=960000035]
+script = ExtResource("game")
+restart_when_all_out = false
+
+[node name="PartyController" type="Node" parent="." unique_id=960000036]
+script = ExtResource("controller")
+start_zone = Rect2(-60, 460, 330, 150)
+goal_zone = Rect2(1930, -70, 340, 180)
+spawn_origin = Vector2(20, 550)

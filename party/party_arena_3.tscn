@@ -1,0 +1,191 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://levels/background.tscn" id="bg"]
+[ext_resource type="Script" path="res://objects/synced_polygon.gd" id="sync"]
+[ext_resource type="Script" path="res://core/camera_script.gd" id="camera"]
+[ext_resource type="Script" path="res://core/game.gd" id="game"]
+[ext_resource type="Script" path="res://player/player_spawner.gd" id="spawner"]
+[ext_resource type="Script" path="res://party/party_controller.gd" id="controller"]
+[ext_resource type="Texture2D" path="res://party/art/flag.webp" id="flag"]
+[ext_resource type="Script" path="res://party/arena_weather.gd" id="weather"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_goal"]
+size = Vector2(90, 130)
+
+[node name="PartyArena3" type="Node2D"]
+
+[node name="Background" parent="." instance=ExtResource("bg")]
+
+[node name="Level" type="Node2D" parent="."]
+
+[node name="Start" type="StaticBody2D" parent="Level"]
+position = Vector2(50, 645)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/Start"]
+polygon = PackedVector2Array(-200, -45, 200, -45, 200, 45, -200, 45)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/Start"]
+polygon = PackedVector2Array(-200, -45, 200, -45, 200, 45, -200, 45)
+script = ExtResource("sync")
+
+[node name="WallLeft" type="StaticBody2D" parent="Level"]
+position = Vector2(-180, 100)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/WallLeft"]
+polygon = PackedVector2Array(-30, -590, 30, -590, 30, 590, -30, 590)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/WallLeft"]
+polygon = PackedVector2Array(-30, -590, 30, -590, 30, 590, -30, 590)
+script = ExtResource("sync")
+
+[node name="IslandA" type="StaticBody2D" parent="Level"]
+position = Vector2(600, 590)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/IslandA"]
+polygon = PackedVector2Array(-120, -30, 120, -30, 120, 30, -120, 30)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/IslandA"]
+polygon = PackedVector2Array(-120, -30, 120, -30, 120, 30, -120, 30)
+script = ExtResource("sync")
+
+[node name="IslandB" type="StaticBody2D" parent="Level"]
+position = Vector2(1000, 510)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/IslandB"]
+polygon = PackedVector2Array(-100, -30, 100, -30, 100, 30, -100, 30)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/IslandB"]
+polygon = PackedVector2Array(-100, -30, 100, -30, 100, 30, -100, 30)
+script = ExtResource("sync")
+
+[node name="Plain" type="StaticBody2D" parent="Level"]
+position = Vector2(1450, 600)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/Plain"]
+polygon = PackedVector2Array(-220, -40, 220, -40, 220, 40, -220, 40)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/Plain"]
+polygon = PackedVector2Array(-220, -40, 220, -40, 220, 40, -220, 40)
+script = ExtResource("sync")
+
+[node name="IslandD" type="StaticBody2D" parent="Level"]
+position = Vector2(1900, 420)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/IslandD"]
+polygon = PackedVector2Array(-90, -25, 90, -25, 90, 25, -90, 25)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/IslandD"]
+polygon = PackedVector2Array(-90, -25, 90, -25, 90, 25, -90, 25)
+script = ExtResource("sync")
+
+[node name="IslandE" type="StaticBody2D" parent="Level"]
+position = Vector2(2300, 320)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/IslandE"]
+polygon = PackedVector2Array(-110, -25, 110, -25, 110, 25, -110, 25)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/IslandE"]
+polygon = PackedVector2Array(-110, -25, 110, -25, 110, 25, -110, 25)
+script = ExtResource("sync")
+
+[node name="Mesa" type="StaticBody2D" parent="Level"]
+position = Vector2(2750, 520)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/Mesa"]
+polygon = PackedVector2Array(-260, -40, 260, -40, 260, 40, -260, 40)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/Mesa"]
+polygon = PackedVector2Array(-260, -40, 260, -40, 260, 40, -260, 40)
+script = ExtResource("sync")
+
+[node name="IslandG" type="StaticBody2D" parent="Level"]
+position = Vector2(3250, 380)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/IslandG"]
+polygon = PackedVector2Array(-100, -25, 100, -25, 100, 25, -100, 25)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/IslandG"]
+polygon = PackedVector2Array(-100, -25, 100, -25, 100, 25, -100, 25)
+script = ExtResource("sync")
+
+[node name="GoalPlatform" type="StaticBody2D" parent="Level"]
+position = Vector2(3720, 230)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/GoalPlatform"]
+polygon = PackedVector2Array(-220, -50, 220, -50, 220, 50, -220, 50)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/GoalPlatform"]
+polygon = PackedVector2Array(-220, -50, 220, -50, 220, 50, -220, 50)
+script = ExtResource("sync")
+
+[node name="WallRight" type="StaticBody2D" parent="Level"]
+position = Vector2(4000, -100)
+metadata/_edit_group_ = true
+
+[node name="CollisionPolygon2D" type="CollisionPolygon2D" parent="Level/WallRight"]
+polygon = PackedVector2Array(-30, -380, 30, -380, 30, 380, -30, 380)
+
+[node name="Polygon2D" type="Polygon2D" parent="Level/WallRight"]
+polygon = PackedVector2Array(-30, -380, 30, -380, 30, 380, -30, 380)
+script = ExtResource("sync")
+
+[node name="Goal" type="Area2D" parent="."]
+position = Vector2(3800, 120)
+monitorable = false
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Goal"]
+shape = SubResource("RectangleShape2D_goal")
+
+[node name="Flag" type="Sprite2D" parent="Goal"]
+texture_filter = 1
+position = Vector2(0, -4)
+scale = Vector2(2.5, 2.5)
+texture = ExtResource("flag")
+
+[node name="Items" type="Node2D" parent="."]
+
+[node name="PlayerSpawner" type="Node2D" parent="."]
+position = Vector2(-40, 550)
+script = ExtResource("spawner")
+allow_drop_in = false
+auto_spawn = false
+
+[node name="Camera2D" type="Camera2D" parent="." node_paths=PackedStringArray("game_manager")]
+position = Vector2(1915.0, 150.0)
+zoom = Vector2(0.3, 0.3)
+script = ExtResource("camera")
+follow_speed = 3.0
+game_manager = NodePath("../Game")
+boundary_left = -500
+boundary_right = 4400
+boundary_bottom = 1300
+max_zoom = 0.6
+min_zoom = 0.28
+zoom_margin = Vector2(900, 650)
+
+[node name="Game" type="Node" parent="."]
+script = ExtResource("game")
+restart_when_all_out = false
+
+[node name="PartyController" type="Node" parent="."]
+script = ExtResource("controller")
+start_zone = Rect2(-160, 420, 440, 190)
+goal_zone = Rect2(3480, -40, 500, 230)
+build_area = Rect2(-150, -500, 4130, 1300)
+spawn_origin = Vector2(-40, 550)
+follow_camera = true
+round_time = 55.0
+
+[node name="Weather" type="Node2D" parent="."]
+script = ExtResource("weather")
+wind = true

@@ -1,0 +1,27 @@
+# Bot Party server list + relay. Installed by setup.sh.
+[Unit]
+Description=Bot Party server list and relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=bot-party
+Group=bot-party
+ExecStart=/usr/bin/python3 /opt/bot-party/server/lobby_server.py --http-port 8910 --relay-port 8911
+Restart=always
+RestartSec=2
+# Hardening: the server only needs to read its own script and open two ports.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+CapabilityBoundingSet=
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target

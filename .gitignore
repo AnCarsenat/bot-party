@@ -1,3 +1,12 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+# Test / export leftovers
+__*.gd
+__*.gd.uid
+/export/
+*.tmp
+# Python
+__pycache__/
+# Editor backups (e.g. sprite.webp~)
+*~

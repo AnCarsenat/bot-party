@@ -1,0 +1,31 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://party/mine.gd" id="1"]
+[ext_resource type="Texture2D" path="res://party/art/landmine.webp" id="2"]
+[ext_resource type="Script" path="res://party/hazard.gd" id="3"]
+
+[sub_resource type="RectangleShape2D" id="Solid"]
+size = Vector2(52, 10)
+
+[sub_resource type="RectangleShape2D" id="R"]
+size = Vector2(68, 24)
+
+[node name="Mine" type="StaticBody2D"]
+script = ExtResource("1")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+show_behind_parent = true
+texture_filter = 1
+scale = Vector2(2, 2)
+texture = ExtResource("2")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, 7)
+shape = SubResource("Solid")
+
+[node name="Trigger" type="Area2D" parent="."]
+script = ExtResource("3")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Trigger"]
+position = Vector2(0, 2)
+shape = SubResource("R")

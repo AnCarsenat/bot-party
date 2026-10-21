@@ -1,0 +1,29 @@
+# Updates the server list / relay on the VPS when server code is pushed to main.
+# Needs repository secrets VPS_HOST, VPS_USER and VPS_KEY (printed by server/deploy/setup.sh).
+name: Deploy server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "server/**"
+      - ".github/workflows/deploy-server.yml"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the server script
+        uses: actions/checkout@v4
+      - run: python3 -m py_compile server/lobby_server.py
+      - name: Update the VPS
+        env:
+          KEY: ${{ secrets.VPS_KEY }}
+          HOST: ${{ secrets.VPS_HOST }}
+          USER: ${{ secrets.VPS_USER }}
+        run: |
+          install -m 600 /dev/null key && printf '%s\n' "$KEY" > key
+          # The key can only run update.sh on the VPS, whatever command is sent.
+          ssh -i key -o StrictHostKeyChecking=accept-new "$USER@$HOST" update
+          rm -f key

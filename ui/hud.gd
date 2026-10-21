@@ -7,6 +7,8 @@ var _players_box: HBoxContainer
 var _hint: Label
 var _pause: Control
 var _resume_button: Button
+var _restart_button: Button
+var _menu_button: Button
 var _scene: Node
 
 
@@ -38,7 +40,7 @@ func _ready() -> void:
 	_top.add_child(_players_box)
 
 	_hint = Label.new()
-	_hint.text = "Esc or Start to pause"
+	_hint.text = "Esc: pause"
 	_hint.add_theme_font_size_override("font_size", 18)
 	_hint.add_theme_color_override("font_outline_color", UiTheme.MARBLE)
 	_hint.add_theme_constant_override("outline_size", 5)
@@ -67,9 +69,18 @@ func _build_pause() -> Control:
 	col.add_child(UiTheme.title("Paused", 48))
 	_resume_button = UiTheme.button("Resume", func(): set_paused(false))
 	col.add_child(_resume_button)
-	col.add_child(UiTheme.button("Restart level", func(): set_paused(false); GameState.restart_level()))
-	col.add_child(UiTheme.button("Main menu", func(): set_paused(false); GameState.go_to_menu()))
+	_restart_button = UiTheme.button("Restart level", func(): set_paused(false); GameState.restart_level())
+	col.add_child(_restart_button)
+	_menu_button = UiTheme.button("Main menu", func(): set_paused(false); _to_menu())
+	col.add_child(_menu_button)
 	return dim
+
+
+## Online host: everyone goes back to the online lobby. Online client: leaves the game.
+func _to_menu() -> void:
+	if Net.is_client():
+		Net.leave()
+	GameState.go_to_menu()
 
 
 func in_level() -> bool:
@@ -80,9 +91,12 @@ func in_level() -> bool:
 func set_paused(value: bool) -> void:
 	if value and not in_level():
 		return
-	get_tree().paused = value
+	# Online, the game keeps running for everyone else: the menu is just an overlay.
+	get_tree().paused = value and not Net.is_online()
 	_pause.visible = value
 	if value:
+		_restart_button.visible = not Net.is_client()
+		_menu_button.text = "Leave game" if Net.is_client() else ("Back to lobby" if Net.is_host() else "Main menu")
 		_resume_button.grab_focus()
 
 
