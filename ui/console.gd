@@ -40,6 +40,7 @@ func _build() -> void:
 	_panel = PanelContainer.new()
 	_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	_panel.offset_bottom = 330
+	_panel.self_modulate.a = 0.8  # see the game through it (the text stays solid)
 	_panel.hide()
 	root.add_child(_panel)
 	var col := VBoxContainer.new()

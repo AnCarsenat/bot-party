@@ -144,9 +144,42 @@ never downloads scripts: in online games everybody needs the mod installed.
 
 ### Maps
 
-Make a map with **Party > Map editor**. Saved maps are in `maps/` next to `mods/`;
-copy the `.json` files into your mod's `maps` folder. They show up in
-**Party > Arena**, marked "(mod)".
+There are two ways to make maps:
+
+- **In the game**: Party > Map editor. Ground is made of polygons of any
+  shape. You can drag points, handles and shapes from the palette, and the
+  editor snaps to the grid and to other objects.
+- **In Godot**: open `editor/arena_template.tscn`, save it under a new name, and
+  edit it with Godot's own tools:
+  - `Ground/` holds Polygon2D nodes for the solid ground;
+  - `Planks/` holds Polygon2D rectangles for one-way planks;
+  - `Start` is a Polygon2D rectangle for the start area;
+  - `Flag` is a Marker2D.
+
+  Set the name in the inspector and press **Save map**. Run the scene (F6) to
+  play it straight away. **Load the map file** brings an existing map into the
+  scene.
+
+Saved maps go to `maps/` next to `mods/`. In Godot, you can also set
+`save_folder` to save straight into your mod. Copy the `.json` files into
+your mod's `maps` folder. They show up in **Party > Arena**, marked "(mod)".
+
+A map file looks like this (format 2):
+
+```json
+{
+  "format": 2, "name": "Bumper alley", "author": "You",
+  "ground": [ [[-192, 576], [448, 576], [448, 672], [-192, 672]] ],
+  "planks": [ [896, 416, 192] ],
+  "start": [-160, 384, 416, 192],
+  "goal": [2208, 384],
+  "wind": false, "meteors": false
+}
+```
+
+`ground` is a list of polygons, each a list of `[x, y]` points (no
+self-crossing). `planks` are `[x, y, width]`, `start` is `[x, y, width,
+height]` and `goal` is where the flag stands, on top of ground.
 
 ### Textures
 

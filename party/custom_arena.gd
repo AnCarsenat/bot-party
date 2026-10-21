@@ -12,8 +12,8 @@ func _enter_tree() -> void:
 	var m: Dictionary = ArenaMap.normalize(Party.session.get("map", ArenaMap.blank()))
 	var level := $Level
 	var i := 0
-	for b in m.blocks:
-		_block(level, "Block%d" % i, ArenaMap.rect(b))
+	for poly in m.ground:
+		_ground(level, "Ground%d" % i, ArenaMap.points(poly))
 		i += 1
 	i = 0
 	for p in m.planks:
@@ -44,18 +44,14 @@ func _enter_tree() -> void:
 	set_meta("title", m.name)
 
 
-func _block(parent: Node, n: String, r: Rect2) -> void:
+func _ground(parent: Node, n: String, pts: PackedVector2Array) -> void:
 	var body := StaticBody2D.new()
 	body.name = n
-	body.position = r.get_center()
-	var hw := r.size.x / 2.0
-	var hh := r.size.y / 2.0
-	var poly := PackedVector2Array([Vector2(-hw, -hh), Vector2(hw, -hh), Vector2(hw, hh), Vector2(-hw, hh)])
 	var col := CollisionPolygon2D.new()
-	col.polygon = poly
+	col.polygon = pts
 	body.add_child(col)
 	var vis := Polygon2D.new()
-	vis.polygon = poly
+	vis.polygon = pts
 	vis.set_script(SYNC)
 	body.add_child(vis)
 	parent.add_child(body)
