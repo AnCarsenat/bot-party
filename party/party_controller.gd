@@ -1003,7 +1003,10 @@ class _Card extends Control:
 		var ir := Rect2(card.position + Vector2((card.size.x - 80) / 2.0, 14), Vector2(80, 80))
 		draw_texture_rect(icon, ir, false, Color(1, 1, 1, 0.35) if taker else Color.WHITE)
 		var font: Font = UiTheme.FONT_MEDIUM
-		var fs := 20 if def.name.length() <= 10 else 16
+		# Biggest size that fits the card (long names like "Plane launcher").
+		var fs := 20
+		while fs > 10 and font.get_string_size(def.name, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > card.size.x - 14:
+			fs -= 1
 		draw_string(font, card.position + Vector2(0, 124), def.name, HORIZONTAL_ALIGNMENT_CENTER, card.size.x, fs,
 			UiTheme.INK if not taker else Color("8a8796"))
 		if taker:

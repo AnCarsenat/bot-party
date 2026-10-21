@@ -19,7 +19,7 @@ func _ready() -> void:
 	_label.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_label.add_theme_font_override("font", preload("res://ui/fonts/pixelify-sans-latin-700-normal.woff2"))
+	_label.add_theme_font_override("font", UiTheme.FONT_BOLD)
 	_label.add_theme_font_size_override("font_size", 56)
 	_label.add_theme_color_override("font_color", Color("ece9ee"))
 	_label.modulate.a = 0.0

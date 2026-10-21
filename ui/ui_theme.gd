@@ -1,6 +1,6 @@
 class_name UiTheme
 ## The game's UI look, taken from the sprites: black outlines, pastel fills,
-## marble backgrounds, pixel type (Pixelify Sans, OFL - see ui/fonts).
+## marble backgrounds, pixel type (Jersey 10 and 15, OFL - see ui/fonts).
 
 const INK := Color("000000")        # outlines and text, like the sprites
 const MARBLE := Color("ece9ee")     # paper / panels (from tile.webp)
@@ -14,9 +14,9 @@ const MUTED := Color("5c5a68")      # secondary text on marble
 const TEXT := INK
 const ACCENT := Color("2f7a43")     # dark green, readable on marble
 
-const FONT_REGULAR := preload("res://ui/fonts/pixelify-sans-latin-400-normal.woff2")
-const FONT_MEDIUM := preload("res://ui/fonts/pixelify-sans-latin-500-normal.woff2")
-const FONT_BOLD := preload("res://ui/fonts/pixelify-sans-latin-700-normal.woff2")
+const FONT_REGULAR := preload("res://ui/fonts/Jersey15.ttf")
+const FONT_MEDIUM := preload("res://ui/fonts/Jersey15.ttf")
+const FONT_BOLD := preload("res://ui/fonts/Jersey10.ttf")
 
 
 static func frame(name: String) -> StyleBoxTexture:

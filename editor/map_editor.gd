@@ -199,7 +199,7 @@ func _build_ui() -> void:
 	_status.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	_status.offset_left = 16
 	_status.offset_top = -40
-	_status.add_theme_font_size_override("font_size", 16)
+	_status.add_theme_font_size_override("font_size", 19)
 	_status.add_theme_color_override("font_outline_color", UiTheme.MARBLE)
 	_status.add_theme_constant_override("outline_size", 6)
 	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -210,8 +210,8 @@ func _build_ui() -> void:
 ## The game's look, but smaller: the editor has lots of buttons.
 func _compact_theme() -> Theme:
 	var t := UiTheme.make()
-	t.default_font_size = 15
-	t.set_font_size("font_size", "Button", 15)
+	t.default_font_size = 19
+	t.set_font_size("font_size", "Button", 19)
 	for state in ["normal", "hover", "focus", "pressed", "disabled"]:
 		var box: StyleBox = t.get_stylebox(state, "Button").duplicate()
 		box.content_margin_left = 9

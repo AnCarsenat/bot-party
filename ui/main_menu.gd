@@ -115,7 +115,7 @@ func _build_layout() -> void:
 	_info = Label.new()
 	_info.anchor_left = 1.0
 	_info.anchor_right = 1.0
-	_info.offset_left = -520
+	_info.offset_left = -480
 	_info.offset_right = -120
 	_info.offset_top = 330
 	_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
