@@ -56,6 +56,11 @@ func firing() -> bool:
 	return fmod(_t, on_time + off_time) >= off_time
 
 
+## Will it be firing `seconds` from now? (Bots use it to time their jumps.)
+func firing_in(seconds: float) -> bool:
+	return fmod(_t + seconds, on_time + off_time) >= off_time
+
+
 func reset_round() -> void:
 	_t = 0.0
 	_apply(false)

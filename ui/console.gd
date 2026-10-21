@@ -332,6 +332,15 @@ func _register_all() -> void:
 		return "")
 
 	# Party.
+	_add("bots", "bots <count> [easy|normal|hard]", "Party: computer players for the next new party.", func(a):
+		if a.is_empty():
+			return "%d bots, %s" % [Party.bot_count, PartyBot.SKILL_NAMES[Party.bot_skill]]
+		Party.bot_count = clampi(int(_arg(a, 0)), 0, GameState.MAX_PLAYERS - 1)
+		var names := PartyBot.SKILL_NAMES.map(func(n): return n.to_lower())
+		if a.size() > 1 and _arg(a, 1).to_lower() in names:
+			Party.bot_skill = names.find(_arg(a, 1).to_lower())
+		Party.save_weights()
+		return "%d bots, %s (from the next new party)" % [Party.bot_count, PartyBot.SKILL_NAMES[Party.bot_skill]])
 	_add("items", "items", "List party item names.", func(_a): return ", ".join(Party.ITEMS.keys()))
 	_add("give", "give <item> [player]", "Party: give a player this item (while picking or placing).", func(a):
 		if not _ctl():

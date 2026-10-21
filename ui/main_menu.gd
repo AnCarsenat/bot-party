@@ -197,6 +197,12 @@ func _show(screen: String, keep_index := false) -> void:
 				"value": func(): return "< %s >" % Party.arena_choice_name().left(12),
 				"on_left": func(): _cycle_arena(-1), "on_right": func(): _cycle_arena(1),
 				"on_accept": func(): _cycle_arena(1)})
+			if not Net.is_online():
+				_items.append({"text": "Bots", "info": "Computer players for new parties.\nLeft / right: how many\nJump: how good (easy, normal, hard)",
+					"value": func(): return "< %s >" % ("None" if Party.bot_count == 0 else "%d, %s" % [Party.bot_count, PartyBot.SKILL_NAMES[Party.bot_skill]]),
+					"on_left": func(): _set_bots(Party.bot_count - 1, Party.bot_skill),
+					"on_right": func(): _set_bots(Party.bot_count + 1, Party.bot_skill),
+					"on_accept": func(): _set_bots(maxi(1, Party.bot_count), (Party.bot_skill + 1) % 3)})
 			_items.append({"text": "Items", "on_accept": func(): _show("party_items"), "info": "Which items show up, and how often."})
 			if not Net.is_online():
 				_items.append({"text": "Map editor", "on_accept": func(): get_tree().root.get_node("Transition").change_scene("res://editor/map_editor.tscn"),
@@ -493,6 +499,13 @@ func _mod_info(mod: Dictionary) -> String:
 	for p in mod.problems.slice(0, 2):
 		lines.append("! " + p)
 	return "\n".join(lines)
+
+
+func _set_bots(count: int, skill: int) -> void:
+	Party.bot_count = clampi(count, 0, GameState.MAX_PLAYERS - maxi(1, GameState.joined.size()))
+	Party.bot_skill = skill
+	Party.save_weights()
+	_refresh_info()
 
 
 func _cycle_arena(step: int) -> void:

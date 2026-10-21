@@ -123,6 +123,8 @@ func save_weights() -> void:
 	for k in weights:
 		cfg.set_value("weights", k, weights[k])
 	cfg.set_value("party", "arena", arena_choice)
+	cfg.set_value("party", "bots", bot_count)
+	cfg.set_value("party", "bot_skill", bot_skill)
 	cfg.save(ITEMS_PATH)
 
 
@@ -131,6 +133,8 @@ func load_weights() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(ITEMS_PATH) == OK:
 		arena_choice = str(cfg.get_value("party", "arena", "random"))
+		bot_count = clampi(int(cfg.get_value("party", "bots", 0)), 0, GameState.MAX_PLAYERS - 1)
+		bot_skill = clampi(int(cfg.get_value("party", "bot_skill", 1)), 0, 2)
 	if cfg.load(ITEMS_PATH) == OK and cfg.has_section("weights"):
 		for k in cfg.get_section_keys("weights"):
 			if ITEMS.has(k):
@@ -139,6 +143,9 @@ func load_weights() -> void:
 
 ## Which arena new parties use: "random", a built-in arena path, or "map:<file>".
 var arena_choice := "random"
+## Computer players added to new parties (offline only), and how good they are.
+var bot_count := 0
+var bot_skill := 1  # PartyBot.Skill
 ## Set while testing a map from the editor: going back to the menu returns there.
 var return_to_editor := false
 
@@ -149,6 +156,17 @@ func new_session(players: Array, choice := "") -> void:
 		scores[str(s)] = 0
 	session = {"round": 1, "scores": scores, "players": players.duplicate(), "items": [],
 		"arena": ARENAS[randi() % ARENAS.size()]}
+	# Bots take the free slots after the people.
+	var bots := {}
+	if not get_node("/root/Net").is_online():
+		for s in range(1, GameState.MAX_PLAYERS + 1):
+			if bots.size() >= bot_count or session.players.size() >= GameState.MAX_PLAYERS:
+				break
+			if not s in session.players:
+				session.players.append(s)
+				session.scores[str(s)] = 0
+				bots[str(s)] = bot_skill
+	session.bots = bots
 	if choice == "":
 		choice = arena_choice
 	if choice.begins_with("map:"):
@@ -221,6 +239,14 @@ func arena() -> String:
 
 func score(slot: int) -> int:
 	return int(session.scores.get(str(slot), 0))
+
+
+## Slot -> skill of the computer players in this party.
+func bots() -> Dictionary:
+	var out := {}
+	for k in session.get("bots", {}):
+		out[int(k)] = int(session.bots[k])
+	return out
 
 
 func players() -> Array[int]:

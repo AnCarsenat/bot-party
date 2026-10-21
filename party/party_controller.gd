@@ -70,6 +70,11 @@ func _ready() -> void:
 	if Party.session.is_empty() and not Party.load_save():
 		Party.new_session(GameState.joined)  # arena started directly from the editor
 	slots = Party.players()
+	for b in Party.bots():
+		if b in slots:
+			var bot := PartyBot.new(b, Party.bots()[b])
+			bot.ctl = self
+			add_child(bot)
 	for rec in Party.session.items.duplicate():
 		if not rec.has("uid"):
 			rec.uid = _new_uid()  # saves from before attachments
@@ -542,6 +547,8 @@ func _start_countdown() -> void:
 		var pos := spawn_origin + Vector2((i % 4) * 80.0, -(i / 4) * 100.0)
 		var p := _spawner.spawn(slots[i], pos, slots.size() > 1)
 		p.set_ghostly(true)  # party: run through each other, no standing on heads
+		if Party.bots().has(slots[i]) and p.has_node("Tag"):
+			p.get_node("Tag").text = "Bot"
 		p.set_physics_process(false)
 		players[slots[i]] = p
 		if modifier != "":
