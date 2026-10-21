@@ -1,0 +1,31 @@
+{
+  "name": "Example mod",
+  "author": "Bot Party",
+  "version": "1.0",
+  "description": "A pinball bumper, a long plank, a mint coin and a map.",
+
+  "items": {
+    "bumper": {
+      "name": "Bumper",
+      "scene": "res://party/items/block.tscn",
+      "script": "bumper.gd",
+      "icon": "bumper.png",
+      "size": [64, 64],
+      "weight": 8
+    },
+    "long_plank": {
+      "name": "Long plank",
+      "scene": "res://objects/platform.tscn",
+      "icon": "res://objects/toggle_platform_enabled.webp",
+      "props": { "size": [320, 30], "one_way": true },
+      "size": [320, 30],
+      "weight": 5
+    }
+  },
+
+  "textures": {
+    "party/art/coin.webp": "mint_coin.png"
+  },
+
+  "maps": "maps"
+}

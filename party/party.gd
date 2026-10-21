@@ -17,7 +17,7 @@ const POINTS_TRAP := 2
 ## Everything a player can pick. size/offset describe the item's footprint
 ## (used to stop building in the start and goal areas). weight: how often it
 ## shows up in the box by default (players can change it in Party > Items).
-const ITEMS := {
+const BUILT_IN_ITEMS := {
 	"block": {"name": "Block", "scene": "res://party/items/block.tscn", "icon": "res://party/art/block.webp", "size": Vector2(64, 64), "weight": 10},
 	"plank": {"name": "Plank", "scene": "res://objects/platform.tscn", "icon": "res://objects/toggle_platform_enabled.webp", "size": Vector2(192, 30), "props": {"size": Vector2(192, 30), "one_way": true}, "weight": 10},
 	"spikes": {"name": "Spikes", "scene": "res://party/items/spikes.tscn", "icon": "res://party/art/spikes.webp", "size": Vector2(64, 28), "weight": 10},
@@ -38,6 +38,8 @@ const ITEMS := {
 	"bomb": {"name": "Bomb", "bomb": true, "radius": 130.0, "icon": "res://party/art/bomb.webp", "size": Vector2(64, 64), "weight": 6},
 	"nuke": {"name": "Nuke", "bomb": true, "radius": 260.0, "icon": "res://party/art/nuke.webp", "size": Vector2(64, 64), "weight": 1},
 }
+## Built-in items plus the ones from enabled mods (see reload_items).
+var ITEMS: Dictionary = BUILT_IN_ITEMS.duplicate(true)
 const MAX_WEIGHT := 20
 const ITEMS_PATH := "user://party_items.cfg"
 
@@ -54,7 +56,24 @@ var weights := {}
 
 
 func _ready() -> void:
+	reload_items()
+
+
+## Items from mods come and go with their on/off switch.
+func reload_items() -> void:
+	ITEMS = BUILT_IN_ITEMS.duplicate(true)
+	var mods := get_node_or_null("/root/Mods")
+	if mods:
+		ITEMS.merge(mods.items())
 	load_weights()
+
+
+## An item's picture (mods can bring their own).
+func icon(id: String) -> Texture2D:
+	var def: Dictionary = ITEMS.get(id, {})
+	if def.has("icon_texture"):
+		return def.icon_texture
+	return load(def.get("icon", "res://party/art/block.webp"))
 
 
 # --- Item odds -------------------------------------------------------------------
@@ -239,6 +258,8 @@ func load_save() -> bool:
 		return false
 	session = data
 	session.round = int(session.round)
+	# Items from a mod that's been turned off since are left out.
+	session.items = session.get("items", []).filter(func(r): return r is Dictionary and ITEMS.has(str(r.get("id", ""))))
 	return true
 
 

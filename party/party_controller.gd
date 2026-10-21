@@ -287,6 +287,8 @@ static func can_attach(id: String) -> bool:
 
 
 func _spawn_item(id: String, pos: Vector2, owner_slot: int, record: Dictionary) -> Node2D:
+	if not Party.ITEMS.has(id):
+		return null  # from a mod that isn't here
 	var def: Dictionary = Party.ITEMS[id]
 	var parent: Node2D = _items
 	if record.has("host"):
@@ -307,6 +309,11 @@ func _spawn_item(id: String, pos: Vector2, owner_slot: int, record: Dictionary) 
 		item.name = "Item%d" % int(record.uid)  # same path on every computer (online)
 	parent.add_child(item)
 	item.set_meta("owner_slot", owner_slot)
+	if def.has("script"):
+		var behaviour := Node.new()  # a mod's script: get_parent() is the item
+		behaviour.name = "ModScript"
+		behaviour.set_script(load(def.script))
+		item.add_child(behaviour)
 	for h in item.find_children("*", "Area2D", true, false):
 		if h is Hazard:
 			h.owner_slot = owner_slot
@@ -475,7 +482,7 @@ func _make_ghost(id: String, slot: int) -> Node2D:
 	var g: Node2D
 	if def.get("bomb", false):
 		var s := Sprite2D.new()
-		s.texture = load(def.icon)
+		s.texture = Party.icon(id)
 		s.scale = Vector2(2, 2)
 		s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		g = s
@@ -984,7 +991,7 @@ class _Card extends Control:
 		draw_style_box(_frame_lime if not hovering.is_empty() else _frame_crate, card)
 		# Icon and name.
 		if _icon == null:
-			_icon = load(def.icon)
+			_icon = Party.icon(item)
 		var icon := _icon
 		var ir := Rect2(card.position + Vector2((card.size.x - 80) / 2.0, 14), Vector2(80, 80))
 		draw_texture_rect(icon, ir, false, Color(1, 1, 1, 0.35) if taker else Color.WHITE)

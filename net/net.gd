@@ -210,10 +210,14 @@ func _on_peer_disconnected(id: int) -> void:
 
 ## A client says hello with its name and the key sets of its players.
 @rpc("any_peer", "call_remote", "reliable")
-func _hello(who: String, local_slots: Array) -> void:
+func _hello(who: String, local_slots: Array, their_mods := []) -> void:
 	if not is_host():
 		return
 	var id := multiplayer.get_remote_sender_id()
+	var missing := _missing_mods(their_mods)
+	if missing != "":
+		_refused.rpc_id(id, "You need these mods to join: " + missing)
+		return
 	for l in local_slots:
 		_add_player(id, int(l), who)
 	_roster_updated()
@@ -222,6 +226,26 @@ func _hello(who: String, local_slots: Array) -> void:
 	if scene and scene.scene_file_path != "":
 		_load_scene.rpc_id(id, scene.scene_file_path, "", 0.0, _scene_token, _scene_extra(scene.scene_file_path))
 		_welcome.call_deferred(id)
+
+
+## Host: which of our item mods the client lacks ("" = none).
+func _missing_mods(theirs: Array) -> String:
+	var out := []
+	for r in _mods().required():
+		if not r in theirs:
+			out.append(r.split("@")[0])
+	return ", ".join(out)
+
+
+func _mods() -> Node:
+	return get_node("/root/Mods")
+
+
+## Host -> client: you can't join (mods missing).
+@rpc("authority", "call_remote", "reliable")
+func _refused(reason: String) -> void:
+	leave()
+	failed.emit(reason)
 
 
 ## A client's player joins (from their lobby) or leaves.
@@ -399,7 +423,7 @@ func _start_client(ip: String, port: int, text: String) -> void:
 func _on_connected() -> void:
 	_short_timeout(1)
 	_offline_joined = GameState.joined.duplicate()
-	_hello.rpc_id(1, player_name, Array(GameState.joined))
+	_hello.rpc_id(1, player_name, Array(GameState.joined), _mods().required())
 	status.emit("Connected")
 	connected.emit()
 

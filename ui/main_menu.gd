@@ -194,7 +194,7 @@ func _show(screen: String, keep_index := false) -> void:
 			if Party.has_save():
 				_items.append({"text": "Continue", "on_accept": func(): _start(func(): Party.continue_game()), "info": Party.describe_save()})
 			_items.append({"text": "Arena", "info": "Left / right: where new parties are played.\nYour own maps are listed too.",
-				"value": func(): return Party.arena_choice_name().left(12),
+				"value": func(): return "< %s >" % Party.arena_choice_name().left(12),
 				"on_left": func(): _cycle_arena(-1), "on_right": func(): _cycle_arena(1),
 				"on_accept": func(): _cycle_arena(1)})
 			_items.append({"text": "Items", "on_accept": func(): _show("party_items"), "info": "Which items show up, and how often."})
@@ -205,7 +205,7 @@ func _show(screen: String, keep_index := false) -> void:
 		"party_items":
 			for id in Party.ITEMS:
 				var def: Dictionary = Party.ITEMS[id]
-				_items.append({"text": def.name, "icon": load(def.icon), "size": 34, "info": "Left / right: how often\nJump: on / off",
+				_items.append({"text": def.name, "icon": Party.icon(id), "size": 34, "info": "Left / right: how often\nJump: on / off",
 					"value": func(): return _item_value(id),
 					"on_left": func(): _set_item_weight(id, Party.weight(id) - 1),
 					"on_right": func(): _set_item_weight(id, Party.weight(id) + 1),
@@ -255,10 +255,23 @@ func _show(screen: String, keep_index := false) -> void:
 				{"text": "Music", "key": "music_volume", "on_left": func(): _bump("music_volume", -0.1), "on_right": func(): _bump("music_volume", 0.1), "on_accept": func(): _bump("music_volume", 0.1, true), },
 				{"text": "Sounds", "key": "sfx_volume", "on_left": func(): _bump("sfx_volume", -0.1), "on_right": func(): _bump("sfx_volume", 0.1), "on_accept": func(): _bump("sfx_volume", 0.1, true)},
 				{"text": "Fullscreen", "key": "fullscreen", "on_left": func(): _toggle("fullscreen"), "on_right": func(): _toggle("fullscreen"), "on_accept": func(): _toggle("fullscreen")},
+				{"text": "Mods", "on_accept": func(): _show("mods"), "info": "Items, maps and textures made by players.",
+					"enabled": not Net.is_online()},
 				{"text": "Back", "on_accept": func(): _back()},
 			]
+		"mods":
+			Mods.scan()
+			for m in Mods.mods:
+				var mod: Dictionary = m
+				_items.append({"text": mod.name.left(16), "size": 34,
+					"value": func(): return "On" if mod.enabled else "Off",
+					"on_accept": func(): _toggle_mod(mod), "on_left": func(): _toggle_mod(mod), "on_right": func(): _toggle_mod(mod),
+					"info": _mod_info(mod)})
+			_items.append({"text": "Open mods folder", "on_accept": func(): Mods.open_folder(),
+				"info": "Put each mod in its own folder here:\n%s\nThen come back to this screen." % ProjectSettings.globalize_path(Mods.DIR)})
+			_items.append({"text": "Back", "on_accept": func(): _back()})
 	_heading.text = {"main": "", "campaign": _campaign_heading(), "party": "Party", "party_items": "Party items", "players": "Players",
-		"settings": "Settings", "online": "Online", "servers": "Server list", "online_lobby": _online_heading()}[screen]
+		"settings": "Settings", "mods": "Mods", "online": "Online", "servers": "Server list", "online_lobby": _online_heading()}[screen]
 	if not keep_index:
 		_index = 0
 	_index = clampi(_index, 0, _items.size() - 1)
@@ -457,6 +470,31 @@ func _toggle(key: String) -> void:
 
 # --- Input --------------------------------------------------------------------
 
+func _toggle_mod(mod: Dictionary) -> void:
+	Mods.set_enabled(mod.id, not mod.enabled)
+	_items[_index].info = _mod_info(mod)
+	_refresh_info()
+
+
+func _mod_info(mod: Dictionary) -> String:
+	var lines := []
+	if mod.description != "":
+		lines.append(mod.description.left(120))
+	lines.append("v%s%s" % [mod.version, (" by " + mod.author) if mod.author != "" else ""])
+	var adds := []
+	if not mod.items.is_empty():
+		adds.append("%d item%s" % [mod.items.size(), "s" if mod.items.size() > 1 else ""])
+	if mod.maps != "":
+		adds.append("maps")
+	if not mod.textures.is_empty():
+		adds.append("%d texture%s (restart to see changes)" % [mod.textures.size(), "s" if mod.textures.size() > 1 else ""])
+	if not adds.is_empty():
+		lines.append("Adds " + ", ".join(adds))
+	for p in mod.problems.slice(0, 2):
+		lines.append("! " + p)
+	return "\n".join(lines)
+
+
 func _cycle_arena(step: int) -> void:
 	var options := Party.arena_options()
 	var i := 0
@@ -485,9 +523,12 @@ func _back() -> void:
 		_show("online")
 		_select(2)
 		return
-	if _screen == "party_items":
-		_show("party")
-		_select(_items.size() - 2)  # "Items"
+	if _screen in ["party_items", "mods"]:
+		var text: String = {"party_items": "Items", "mods": "Mods"}[_screen]
+		_show({"party_items": "party", "mods": "settings"}[_screen])
+		for i in _items.size():
+			if _items[i].text == text:
+				_select(i)
 		return
 	var back_to := {"campaign": 0, "party": 1, "online": 2, "players": 3, "settings": 4}
 	var idx: int = back_to.get(_screen, 0)
@@ -650,7 +691,7 @@ class _Row extends Control:
 					draw_rect(r, UiTheme.LIVE if k < roundi(v * 10) else UiTheme.MARBLE)
 					draw_rect(r, UiTheme.INK, false, 3.0)
 		elif item.has("value") and item.value.call() is String:
-			draw_string(UiTheme.FONT_MEDIUM, Vector2(VALUE_X, 46), "< %s >" % item.value.call(), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, UiTheme.INK)
+			draw_string(UiTheme.FONT_MEDIUM, Vector2(VALUE_X, 46), item.value.call(), HORIZONTAL_ALIGNMENT_LEFT, -1, 30, UiTheme.INK)
 		elif item.has("value"):
 			var val: Dictionary = item.value.call()
 			var bar: float = val.bar
