@@ -261,7 +261,7 @@ func _show(screen: String, keep_index := false) -> void:
 					_show("online", true)), "size": 34, "info": "The port your game uses when you host. Friends joining by address add it: ip:port."},
 				{"text": "Name: " + Net.player_name, "on_accept": func(): _edit_text("Your name", Net.player_name, _set_name),
 					"size": 34, "info": "Shown to the others."},
-				{"text": "List: " + (Net.lobby_url if Net.lobby_url != "" else "not set"), "on_accept": func(): _edit_text("Server list address (your VPS)", Net.lobby_url, _set_lobby_url),
+				{"text": "List: " + (Net.lobby_url if Net.lobby_url != "" else "not set"), "on_accept": func(): _edit_text("Server list address (empty: the game's default)", Net.lobby_url, _set_lobby_url),
 					"size": 34, "info": "Address of the server list (server/lobby_server.py)."},
 				{"text": "Back", "on_accept": func(): _back()},
 			]
@@ -428,7 +428,7 @@ func _set_name(t: String) -> void:
 
 
 func _set_lobby_url(t: String) -> void:
-	Net.lobby_url = t.strip_edges()
+	Net.lobby_url = t.strip_edges() if t.strip_edges() != "" else Net.default_lobby_url  # empty: back to the default
 	Net.save_config()
 	_show("online", true)
 

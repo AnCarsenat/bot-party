@@ -38,7 +38,10 @@ var roster: Array = []
 var player_name := "Player"
 ## UDP port to host on (Online > Port, or --port on the command line).
 var host_port := GAME_PORT
-var lobby_url := ""
+## The game's own server list (project.godot: [bot_party] online/server_list).
+var default_lobby_url: String = ProjectSettings.get_setting("bot_party/online/server_list", "")
+## The server list in use: the player's own (Online > List), or the default.
+var lobby_url := default_lobby_url
 var server_name := ""
 
 var _peer: ENetMultiplayerPeer
@@ -900,7 +903,9 @@ func lobby_heartbeat() -> void:
 func save_config() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("online", "name", player_name)
-	cfg.set_value("online", "lobby_url", lobby_url)
+	# Only a list the player typed is saved: if the default changes in a new
+	# version of the game, players who never changed it follow.
+	cfg.set_value("online", "lobby_url", "" if lobby_url == default_lobby_url else lobby_url)
 	cfg.set_value("online", "port", host_port)
 	cfg.save(CONFIG_PATH)
 
@@ -909,5 +914,6 @@ func _load_config() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(CONFIG_PATH) == OK:
 		player_name = cfg.get_value("online", "name", player_name)
-		lobby_url = cfg.get_value("online", "lobby_url", lobby_url)
+		var own: String = cfg.get_value("online", "lobby_url", "")
+		lobby_url = own if own != "" else default_lobby_url
 		host_port = clampi(int(cfg.get_value("online", "port", host_port)), 1024, 65535)

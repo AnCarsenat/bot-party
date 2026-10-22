@@ -19,6 +19,12 @@ config/icon="res://player/icon.png"
 
 buses/default_bus_layout="res://audio/default_bus_layout.tres"
 
+[bot_party]
+
+; Server list (and relay) the game uses unless a player types another one in
+; Online > List. Change it here (on GitHub too: edit project.godot) and rebuild.
+online/server_list="5.78.71.45"
+
 [autoload]
 
 Mods="*res://mods/mods.gd"
