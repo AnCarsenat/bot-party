@@ -360,6 +360,7 @@ p8_action_3={
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
+textures/vram_compression/import_etc2_astc=true
 
 rendering_device/driver.windows="d3d12"
 environment/defaults/default_clear_color=Color(0.47, 0.47, 0.53, 1)
