@@ -10,6 +10,12 @@ const INSET := 24.0
 var _bubbles := {}  # player instance id -> _Bubble
 
 
+## Bubble camera zoom from Settings > Bubble view (0..1 -> 1.0 close .. 0.2 far).
+static func zoom() -> float:
+	var v: float = GameState.settings.get("bubble_view", 0.8)
+	return lerpf(1.0, 0.2, clampf(v, 0.0, 1.0))
+
+
 func _ready() -> void:
 	layer = 30
 
@@ -64,12 +70,13 @@ class _Bubble extends Control:
 		_view.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
 		box.add_child(_view)
 		_cam = Camera2D.new()
-		_cam.zoom = Vector2(0.35, 0.35)
+		_cam.zoom = Vector2.ONE * DistantPlayers.zoom()
 		_view.add_child(_cam)
 		_cam.make_current()
 
 	func follow(p: Node2D, screen: Vector2, view: Rect2) -> void:
 		_cam.global_position = p.global_position
+		_cam.zoom = Vector2.ONE * DistantPlayers.zoom()
 		# On the screen's edge, on the line from the middle to the robot.
 		var mid := view.get_center()
 		var dir := (screen - mid).normalized()

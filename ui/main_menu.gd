@@ -290,6 +290,8 @@ func _show(screen: String, keep_index := false) -> void:
 				{"text": "Fullscreen", "key": "fullscreen", "on_left": func(): _toggle("fullscreen"), "on_right": func(): _toggle("fullscreen"), "on_accept": func(): _toggle("fullscreen")},
 				{"text": "Distant players", "key": "distant_players", "on_left": func(): _toggle("distant_players"), "on_right": func(): _toggle("distant_players"), "on_accept": func(): _toggle("distant_players"),
 					"info": "A robot off the screen gets a bubble at the edge with a small view of it."},
+				{"text": "Bubble view", "key": "bubble_view", "on_left": func(): _bump("bubble_view", -0.1), "on_right": func(): _bump("bubble_view", 0.1), "on_accept": func(): _bump("bubble_view", 0.1, true),
+					"info": "How much of the level a distant player's bubble shows. More bars: zoomed further out."},
 				{"text": "Controls", "on_accept": func(): _show("controls"), "info": "Change the keys of each player."},
 				{"text": "Mods", "on_accept": func(): _show("mods"), "info": "Items, maps and textures made by players.",
 					"enabled": not Net.is_online()},
