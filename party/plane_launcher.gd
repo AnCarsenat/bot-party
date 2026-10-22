@@ -1,14 +1,14 @@
 extends StaticBody2D
-## Paper plane launcher: every few seconds, a paper plane glides out (left, or right
-## when mirrored) and flies straight on, bobbing a little. When it hits a wall or a
-## block it crumples into a paper ball that drops away. Touching a plane takes you
-## out. Planes vanish in the start area.
+## Paper plane launcher: every few seconds, a big paper plane glides out (left, or
+## right when mirrored) and flies straight on. Planes are rides: jump on one (from
+## below too, they're one-way) and it carries you. When it hits a wall or a block it
+## crumples into a paper ball and drops you. Planes vanish in the start area.
 
 const TEX_PLANE := preload("res://party/art/paper_plane.webp")
 const TEX_BALL := preload("res://party/art/paper_ball.webp")
 
 @export var interval: float = 2.8
-@export var plane_speed: float = 230.0
+@export var plane_speed: float = 200.0
 ## How far a plane goes before it's gone.
 @export var reach: float = 2600.0
 ## Planes crumple on solid things (off: they fly through everything).
@@ -73,8 +73,7 @@ func _fire() -> void:
 	plane.life = reach / plane_speed
 	plane.stoppers = (Layers.WORLD | Layers.CRATES) if stopped_by_walls else 0
 	plane.mirrored = mirrored
-	plane.owner_slot = get_meta("owner_slot", 0)
-	plane.add_to_group("bolts")
+	plane.add_to_group("planes")
 	var level := get_tree().current_scene if get_tree().current_scene else get_parent()
 	level.add_child(plane)
 	plane.global_position = muzzle()
@@ -83,7 +82,8 @@ func _fire() -> void:
 	_sprite.position.x = 5.0 if not mirrored else -5.0
 
 
-class _Plane extends Hazard:
+## A paper plane you can ride: a one-way platform that flies in a straight line.
+class _Plane extends StaticBody2D:
 	var velocity := Vector2.ZERO
 	var life := 10.0
 	var stoppers := 0
@@ -93,30 +93,34 @@ class _Plane extends Hazard:
 	var _sprite: Sprite2D
 
 	func _ready() -> void:
-		super()
-		collision_mask = Layers.HURTBOX
+		collision_layer = Layers.WORLD
+		collision_mask = 0
 		var shape := CollisionShape2D.new()
 		var rect := RectangleShape2D.new()
-		rect.size = Vector2(44, 18)
+		rect.size = Vector2(84, 14)
 		shape.shape = rect
+		shape.position = Vector2(0, -6)
+		shape.one_way_collision = true  # jump on from below
 		add_child(shape)
 		_sprite = Sprite2D.new()
 		_sprite.texture = TEX_PLANE
-		_sprite.scale = Vector2(2, 2)
+		_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		_sprite.scale = Vector2(3, 3)
 		_sprite.flip_h = mirrored
 		add_child(_sprite)
+		# Riders move with it.
+		constant_linear_velocity = velocity
 
 	func _physics_process(delta: float) -> void:
 		_t += delta
-		var along := start + velocity * _t
-		# Gentle bob up and down, across the flight direction.
-		var side := velocity.normalized().orthogonal() * sin(_t * 3.5) * 10.0
-		var to := along + side
+		var to := start + velocity * _t
 		if stoppers != 0:
-			var q := PhysicsRayQueryParameters2D.create(global_position, to, stoppers)
-			q.hit_from_inside = true
+			# Look ahead along the flight, at the plane's height.
+			var tip := velocity.normalized() * 44.0
+			var q := PhysicsRayQueryParameters2D.create(global_position, to + tip, stoppers)
+			q.exclude = [get_rid()]
 			var hit := get_world_2d().direct_space_state.intersect_ray(q)
-			if hit:
+			if hit and hit.collider != self and not (hit.collider is _Plane):
 				_crumple(hit.position)
 				queue_free()
 				return
@@ -124,7 +128,7 @@ class _Plane extends Hazard:
 			queue_free()
 			return
 		global_position = to
-		_sprite.rotation = cos(_t * 3.5) * 0.15 * (1.0 if mirrored else -1.0)
+		_sprite.rotation = cos(_t * 3.5) * 0.06 * (1.0 if mirrored else -1.0)
 
 	## Hit a wall: the plane becomes a paper ball that bounces off and drops.
 	func _crumple(at: Vector2) -> void:

@@ -8,6 +8,9 @@ extends Node2D
 ##   Planks/  Polygon2D rectangles: one-way planks (only their width and top count)
 ##   Start    a Polygon2D rectangle: the start area
 ##   Flag     a Marker2D: where the flag stands (on top of ground)
+##   Items/   party items already in place when the party starts: instance the
+##            item scenes (res://party/items/..., platform.tscn, trampoline.tscn);
+##            turn them by quarter turns, flip them with scale.x = -1
 ## Then press "Save map" in the inspector: the map goes to user://maps (shows up
 ## in Party > Arena and in the game's map editor), or into `save_folder` (a mod's
 ## maps folder, for example). Run the scene (F6) to play it straight away.
@@ -20,7 +23,7 @@ extends Node2D
 @export_global_dir var save_folder := ""
 @export_tool_button("Save map", "Save") var save_button := save_map
 ## A map file to bring in (replaces what's in the scene).
-@export_global_file("*.json") var load_file := ""
+@export_global_file("*.json", "*.tscn") var load_file := ""
 @export_tool_button("Load the map file", "Load") var load_button := load_map
 
 
@@ -64,8 +67,41 @@ func to_map() -> Dictionary:
 		m.start = [int(r.position.x), int(r.position.y), int(r.size.x), int(r.size.y)]
 	var flag := get_node_or_null("Flag")
 	if flag is Node2D:
-		m.goal = [int(round(flag.global_position.x)), int(round(flag.global_position.y))]
+		var g := _xform(flag).origin
+		m.goal = [int(round(g.x)), int(round(g.y))]
+	m.items = []
+	var items := get_node_or_null("Items")
+	if items:
+		for it in items.get_children():
+			var id := _item_id(it)
+			if id == "":
+				continue
+			var xf := _xform(it)
+			var mirrored: bool = it.get("mirrored") == true or it.scale.x < 0.0
+			m.items.append({"id": id, "x": int(round(xf.origin.x)), "y": int(round(xf.origin.y)),
+				"rot": posmod(int(round(it.rotation / (PI / 2.0))), 4), "mirror": mirrored})
 	return ArenaMap.normalize(m)
+
+
+## Which party item a scene instance is (by its scene file and settings), or "".
+func _item_id(node: Node) -> String:
+	var party := (Engine.get_main_loop() as SceneTree).root.get_node_or_null("Party")
+	if party == null or node.scene_file_path == "":
+		return ""
+	var best := ""
+	for id in party.ITEMS:
+		var def: Dictionary = party.ITEMS[id]
+		if def.get("scene", "") != node.scene_file_path:
+			continue
+		var same := true
+		for k in def.get("props", {}):
+			if node.get(k) != def.props[k]:
+				same = false
+		if same:
+			return id
+		if best == "":
+			best = id
+	return best
 
 
 ## Rebuilds the scene from a map.
@@ -102,6 +138,32 @@ func from_map(m: Dictionary) -> void:
 		add_child(flag)
 		flag.owner = _owner()
 	flag.position = Vector2(m.goal[0], m.goal[1])
+	var items := get_node_or_null("Items")
+	if items == null:
+		items = Node2D.new()
+		items.name = "Items"
+		add_child(items)
+		items.owner = _owner()
+	for c in items.get_children():
+		items.remove_child(c)
+		c.queue_free()
+	var party := (Engine.get_main_loop() as SceneTree).root.get_node_or_null("Party")
+	for it in m.get("items", []):
+		var def: Dictionary = party.ITEMS.get(it.id, {}) if party else {}
+		if not def.has("scene"):
+			continue
+		var node: Node2D = load(def.scene).instantiate()
+		for k in def.get("props", {}):
+			node.set(k, def.props[k])
+		node.position = Vector2(it.x, it.y)
+		node.rotation = it.rot * PI / 2.0
+		if it.mirror:
+			if "mirrored" in node:
+				node.set("mirrored", true)
+			else:
+				node.scale.x = -1.0
+		items.add_child(node)
+		node.owner = _owner()
 
 
 func save_map() -> String:
@@ -136,9 +198,20 @@ func _polys(group: String) -> Array:
 	return node.find_children("*", "Polygon2D", true, false).filter(func(p): return p.polygon.size() >= 3)
 
 
+## `node`'s transform relative to this scene's root (works outside the tree too).
+func _xform(node: Node) -> Transform2D:
+	var xf := Transform2D.IDENTITY
+	var n := node
+	while n != null and n != self:
+		if n is Node2D:
+			xf = n.transform * xf
+		n = n.get_parent()
+	return xf
+
+
 func _global_points(poly: Polygon2D) -> PackedVector2Array:
 	var out := PackedVector2Array()
-	var xf := get_global_transform().affine_inverse() * poly.get_global_transform()
+	var xf := _xform(poly)
 	for p in poly.polygon:
 		out.append(xf * (p + poly.offset))
 	return out

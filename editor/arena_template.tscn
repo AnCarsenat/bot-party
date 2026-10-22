@@ -1,36 +1,42 @@
 [gd_scene format=3]
 
-[ext_resource type="Script" path="res://editor/arena_source.gd" id="1_e6aa3"]
+[ext_resource type="Script" path="res://editor/arena_source.gd" id="1_n2ylg"]
+[ext_resource type="PackedScene" path="res://objects/trampoline.tscn" id="2_tpi6b"]
 
-[node name="ArenaTemplate" type="Node2D" unique_id=482546381]
-script = ExtResource("1_e6aa3")
+[node name="ArenaTemplate" type="Node2D" unique_id=1696522333]
+script = ExtResource("1_n2ylg")
 
-[node name="Ground" type="Node2D" parent="." unique_id=1085527387]
+[node name="Ground" type="Node2D" parent="." unique_id=412320047]
 
-[node name="Ground1" type="Polygon2D" parent="Ground" unique_id=1571782137]
+[node name="Ground1" type="Polygon2D" parent="Ground" unique_id=264627262]
 polygon = PackedVector2Array(-192, 576, 448, 576, 448, 672, -192, 672)
 
-[node name="Ground2" type="Polygon2D" parent="Ground" unique_id=1035893995]
+[node name="Ground2" type="Polygon2D" parent="Ground" unique_id=1749974496]
 polygon = PackedVector2Array(576, 512, 1024, 512, 1024, 576, 576, 576)
 
-[node name="Ground3" type="Polygon2D" parent="Ground" unique_id=1377592804]
+[node name="Ground3" type="Polygon2D" parent="Ground" unique_id=1098259193]
 polygon = PackedVector2Array(1152, 448, 1600, 448, 1600, 512, 1152, 512)
 
-[node name="Ground4" type="Polygon2D" parent="Ground" unique_id=2017952181]
+[node name="Ground4" type="Polygon2D" parent="Ground" unique_id=1746749309]
 polygon = PackedVector2Array(1728, 384, 2240, 384, 2240, 480, 1728, 480)
 
-[node name="Ground5" type="Polygon2D" parent="Ground" unique_id=1757045643]
+[node name="Ground5" type="Polygon2D" parent="Ground" unique_id=1022547730]
 polygon = PackedVector2Array(1600, 448, 1728, 384, 1728, 448)
 
-[node name="Planks" type="Node2D" parent="." unique_id=1999979098]
+[node name="Planks" type="Node2D" parent="." unique_id=1562681749]
 
-[node name="Plank1" type="Polygon2D" parent="Planks" unique_id=1628457679]
+[node name="Plank1" type="Polygon2D" parent="Planks" unique_id=2086984891]
 color = Color(0.9411765, 1, 0.95686275, 1)
 polygon = PackedVector2Array(960, 352, 1120, 352, 1120, 376, 960, 376)
 
-[node name="Start" type="Polygon2D" parent="." unique_id=1350324860]
+[node name="Start" type="Polygon2D" parent="." unique_id=1215098844]
 color = Color(0.42, 0.73, 0.49, 0.3)
 polygon = PackedVector2Array(-160, 384, 256, 384, 256, 576, -160, 576)
 
-[node name="Flag" type="Marker2D" parent="." unique_id=571027983]
+[node name="Flag" type="Marker2D" parent="." unique_id=1729239729]
 position = Vector2(2048, 384)
+
+[node name="Items" type="Node2D" parent="." unique_id=743964763]
+
+[node name="Trampoline" type="Node2D" parent="Items" unique_id=1485565841 instance=ExtResource("2_tpi6b")]
+position = Vector2(900, 492)

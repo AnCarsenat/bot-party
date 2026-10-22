@@ -26,6 +26,7 @@ var _falling: Array[Dictionary] = []  # {target, t}
 var _rng := RandomNumberGenerator.new()
 var _hz: Hazard
 var _sign: TextureRect
+var _arrows: Control
 
 
 func _ready() -> void:
@@ -42,12 +43,21 @@ func _ready() -> void:
 	_sign.texture = TEX_WIND
 	_sign.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_sign.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_sign.size = Vector2(96, 96)
 	_sign.pivot_offset = Vector2(48, 48)
-	_sign.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_sign.position = Vector2(-48, 110)
+	_sign.anchor_left = 0.5
+	_sign.anchor_right = 0.5
+	_sign.offset_left = -48
+	_sign.offset_right = 48
+	_sign.offset_top = 110
+	_sign.offset_bottom = 206
 	_sign.hide()
 	layer.add_child(_sign)
+	# Arrows beside it: which way it blows.
+	_arrows = _Arrows.new()
+	_arrows.weather = self
+	_arrows.position = Vector2(-80, 0)
+	_arrows.size = Vector2(256, 96)
+	_sign.add_child(_arrows)
 
 
 func _controller() -> Node:
@@ -223,3 +233,24 @@ func gust(dir: float) -> void:
 	wind = dir != 0.0 or wind
 	gust_dir = dir
 	_gust_t = gust_every if dir != 0.0 else 0.0
+
+
+## Three chevrons pointing where the wind blows, sliding that way.
+class _Arrows extends Control:
+	var weather: Node
+
+	func _process(_d: float) -> void:
+		queue_redraw()
+
+	func _draw() -> void:
+		var dir: float = weather.gust_dir
+		if dir == 0.0:
+			return
+		var t := fmod(Time.get_ticks_msec() / 1000.0 * 3.0, 1.0)
+		var mid := size / 2.0
+		for i in 3:
+			var x := (-1.5 + i + t * dir) * 34.0 * dir + 128.0 * dir
+			var c := mid + Vector2(x, 0)
+			var pts := PackedVector2Array([c + Vector2(-10 * dir, -18), c + Vector2(10 * dir, 0), c + Vector2(-10 * dir, 18)])
+			draw_polyline(pts, Color.BLACK, 12.0)
+			draw_polyline(pts, Color("f0fff4"), 6.0)

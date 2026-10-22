@@ -6,7 +6,7 @@ extends Control
 ## "Players" is the lobby: each player presses their own jump key to join.
 
 const TITLE := "Bot Party"
-const VERSION := "v0.25"
+const VERSION := "v0.26"
 const NAV_REPEAT := 0.16  # seconds between moves when a pad stick is held
 const LIST_TOP := 24.0
 const ROW_STEP := 66.0     # row height + separation
@@ -22,6 +22,8 @@ const MACHINES := {
 }
 
 var _screen := "main"
+var _controls_slot := 1   # Settings > Controls: whose keys
+var _capture := ""        # the action waiting for a key press
 var _items: Array = []      # [{text, on_accept, on_left, on_right, enabled, info, key}]
 var _index := 0
 var _rows: Array[Control] = []
@@ -190,23 +192,43 @@ func _show(screen: String, keep_index := false) -> void:
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"party":
 			_items.append({"text": "New party", "on_accept": func(): _start(func(): Party.new_game()),
-				"info": "First to %d wins." % Party.TARGET_SCORE})
+				"info": "First to %d wins." % Party.rules.target})
 			if Party.has_save():
 				_items.append({"text": "Continue", "on_accept": func(): _start(func(): Party.continue_game()), "info": Party.describe_save()})
 			_items.append({"text": "Arena", "info": "Left / right: where new parties are played.\nYour own maps are listed too.",
 				"value": func(): return "< %s >" % Party.arena_choice_name().left(12),
 				"on_left": func(): _cycle_arena(-1), "on_right": func(): _cycle_arena(1),
 				"on_accept": func(): _cycle_arena(1)})
-			if not Net.is_online():
-				_items.append({"text": "Bots", "info": "Computer players for new parties.\nLeft / right: how many\nJump: how good (easy, normal, hard)",
-					"value": func(): return "< %s >" % ("None" if Party.bot_count == 0 else "%d, %s" % [Party.bot_count, PartyBot.SKILL_NAMES[Party.bot_skill]]),
-					"on_left": func(): _set_bots(Party.bot_count - 1, Party.bot_skill),
-					"on_right": func(): _set_bots(Party.bot_count + 1, Party.bot_skill),
-					"on_accept": func(): _set_bots(maxi(1, Party.bot_count), (Party.bot_skill + 1) % 3)})
+			_items.append({"text": "Rules", "on_accept": func(): _show("party_rules"), "info": "Winning score, round time, coins, surprises, item odds."})
 			_items.append({"text": "Items", "on_accept": func(): _show("party_items"), "info": "Which items show up, and how often."})
 			if not Net.is_online():
 				_items.append({"text": "Map editor", "on_accept": func(): get_tree().root.get_node("Transition").change_scene("res://editor/map_editor.tscn"),
 					"info": "Draw your own arenas (mouse). Saved maps show up under Arena."})
+			_items.append({"text": "Back", "on_accept": func(): _back()})
+		"party_rules":
+			var r: Dictionary = Party.rules
+			var onoff := func(k: String): return "< %s >" % ("On" if r[k] else "Off")
+			var flip := func(k: String): r[k] = not r[k]; Party.save_weights(); _refresh_info()
+			var step := func(k: String, d: int, lo: int, hi: int): r[k] = clampi(int(r[k]) + d, lo, hi); Party.save_weights(); _refresh_info()
+			_items.append({"text": "Mode", "info": "How the party is played.\n" + str(Party.modes().get(r.mode, {}).get("description", "")),
+				"value": func(): return "< %s >" % str(Party.modes().get(r.mode, {"name": "Classic"}).name).left(14),
+				"on_left": func(): _cycle_mode(-1), "on_right": func(): _cycle_mode(1), "on_accept": func(): _cycle_mode(1)})
+			_items.append({"text": "First to", "info": "Points needed to win the party.",
+				"value": func(): return "< %d >" % r.target,
+				"on_left": func(): step.call("target", -10, 10, 300), "on_right": func(): step.call("target", 10, 10, 300),
+				"on_accept": func(): step.call("target", 10, 10, 300)})
+			_items.append({"text": "Round time", "info": "Seconds to reach the flag. Arena: each arena's own time.",
+				"value": func(): return "< %s >" % ("Arena" if r.round_time == 0 else "%d s" % r.round_time),
+				"on_left": func(): step.call("round_time", -10, 0, 180), "on_right": func(): step.call("round_time", 10, 0, 180),
+				"on_accept": func(): step.call("round_time", 10, 0, 180)})
+			_items.append({"text": "Coins", "info": "A coin to grab on the way: bonus points if you reach the flag with it.",
+				"value": func(): return onoff.call("coins"), "on_left": func(): flip.call("coins"), "on_right": func(): flip.call("coins"), "on_accept": func(): flip.call("coins")})
+			_items.append({"text": "Surprises", "info": "Some rounds get a surprise rule (low gravity, speedy...).",
+				"value": func(): return onoff.call("surprises"), "on_left": func(): flip.call("surprises"), "on_right": func(): flip.call("surprises"), "on_accept": func(): flip.call("surprises")})
+			_items.append({"text": "Equal odds", "info": "Every item that's on is as likely as the others (ignores Party > Items odds).",
+				"value": func(): return onoff.call("equal_odds"), "on_left": func(): flip.call("equal_odds"), "on_right": func(): flip.call("equal_odds"), "on_accept": func(): flip.call("equal_odds")})
+			_items.append({"text": "Reset", "info": "Back to the usual rules.", "on_accept": func():
+				Party.rules = Party.RULE_DEFAULTS.duplicate(); Party.save_weights(); _show("party_rules", true)})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"party_items":
 			for id in Party.ITEMS:
@@ -225,11 +247,16 @@ func _show(screen: String, keep_index := false) -> void:
 				{"text": "Host public game", "on_accept": func(): _start(func(): _host(true)),
 					"info": "Listed on the server list. Friends can join from anywhere."},
 				{"text": "Host private game", "on_accept": func(): _start(func(): _host(false)),
-					"info": "Not listed: friends join with your address (UDP port %d)." % Net.GAME_PORT},
+					"info": "Not listed: friends join with your address (UDP port %d)." % Net.host_port},
 				{"text": "Server list", "on_accept": func(): _listing = true; _servers.clear(); _show("servers"); Net.list_servers(),
 					"info": "Games hosted by others." if Net.lobby_url != "" else "Set the server list address first."},
 				{"text": "Join by address", "on_accept": func(): _start(func(): _edit_text("Host address (ip or ip:port)", _last_address,
 					func(t): _last_address = t; _hint.text = "Connecting..."; Net.join_address(t))), "info": "Type the host's address."},
+				{"text": "Port: %d" % Net.host_port, "on_accept": func(): _edit_text("UDP port to host on (1024-65535)", str(Net.host_port), func(t):
+					if t.strip_edges().is_valid_int():
+						Net.host_port = clampi(int(t), 1024, 65535)
+						Net.save_config()
+					_show("online", true)), "size": 34, "info": "The port your game uses when you host. Friends joining by address add it: ip:port."},
 				{"text": "Name: " + Net.player_name, "on_accept": func(): _edit_text("Your name", Net.player_name, _set_name),
 					"size": 34, "info": "Shown to the others."},
 				{"text": "List: " + (Net.lobby_url if Net.lobby_url != "" else "not set"), "on_accept": func(): _edit_text("Server list address (your VPS)", Net.lobby_url, _set_lobby_url),
@@ -261,10 +288,27 @@ func _show(screen: String, keep_index := false) -> void:
 				{"text": "Music", "key": "music_volume", "on_left": func(): _bump("music_volume", -0.1), "on_right": func(): _bump("music_volume", 0.1), "on_accept": func(): _bump("music_volume", 0.1, true), },
 				{"text": "Sounds", "key": "sfx_volume", "on_left": func(): _bump("sfx_volume", -0.1), "on_right": func(): _bump("sfx_volume", 0.1), "on_accept": func(): _bump("sfx_volume", 0.1, true)},
 				{"text": "Fullscreen", "key": "fullscreen", "on_left": func(): _toggle("fullscreen"), "on_right": func(): _toggle("fullscreen"), "on_accept": func(): _toggle("fullscreen")},
+				{"text": "Distant players", "key": "distant_players", "on_left": func(): _toggle("distant_players"), "on_right": func(): _toggle("distant_players"), "on_accept": func(): _toggle("distant_players"),
+					"info": "A robot off the screen gets a bubble at the edge with a small view of it."},
+				{"text": "Controls", "on_accept": func(): _show("controls"), "info": "Change the keys of each player."},
 				{"text": "Mods", "on_accept": func(): _show("mods"), "info": "Items, maps and textures made by players.",
 					"enabled": not Net.is_online()},
 				{"text": "Back", "on_accept": func(): _back()},
 			]
+		"controls":
+			_items.append({"text": "Player", "info": "Left / right: whose keys to change.",
+				"value": func(): return "< P%d >" % _controls_slot,
+				"on_left": func(): _controls_slot = posmod(_controls_slot - 2, 5) + 1; _show("controls", true),
+				"on_right": func(): _controls_slot = posmod(_controls_slot, 5) + 1; _show("controls", true)})
+			for a in PlayerKeys.ACTIONS:
+				var act: String = a
+				_items.append({"text": PlayerKeys.ACTION_NAMES[act], "size": 36,
+					"value": func(): return "Press a key..." if _capture == act else PlayerKeys.key_name(PlayerKeys.key_of(_controls_slot, act)),
+					"on_accept": func(): _capture = act; _hint.text = "Press the new key for P%d %s   (Esc: cancel)" % [_controls_slot, PlayerKeys.ACTION_NAMES[act]],
+					"info": "Jump: change this key.\nKeys dropping out with several players on one keyboard? Keep each player's keys far apart."})
+			_items.append({"text": "Reset all", "info": "Every player back to the usual keys.", "on_accept": func():
+				PlayerKeys.reset(); _hint.text = "Keys reset"; _show("controls", true)})
+			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"mods":
 			Mods.scan()
 			for m in Mods.mods:
@@ -276,8 +320,8 @@ func _show(screen: String, keep_index := false) -> void:
 			_items.append({"text": "Open mods folder", "on_accept": func(): Mods.open_folder(),
 				"info": "Put each mod in its own folder here:\n%s\nThen come back to this screen." % ProjectSettings.globalize_path(Mods.DIR)})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
-	_heading.text = {"main": "", "campaign": _campaign_heading(), "party": "Party", "party_items": "Party items", "players": "Players",
-		"settings": "Settings", "mods": "Mods", "online": "Online", "servers": "Server list", "online_lobby": _online_heading()}[screen]
+	_heading.text = {"main": "", "campaign": _campaign_heading(), "party": "Party", "party_items": "Party items", "party_rules": "Party rules", "players": "Players",
+		"settings": "Settings", "controls": "Controls", "mods": "Mods", "online": "Online", "servers": "Server list", "online_lobby": _online_heading()}[screen]
 	if not keep_index:
 		_index = 0
 	_index = clampi(_index, 0, _items.size() - 1)
@@ -292,6 +336,8 @@ func _show(screen: String, keep_index := false) -> void:
 	_refresh_info()
 	_refresh_footer()
 	_hint.text = "Jump to join or leave" if lobby else ""
+	if screen == "players" and not Net.is_online():
+		_hint.text = "Jump: join or leave   Left / right: bots (party mode)   Up / down: how good they are"
 	if screen == "online_lobby" and Net.is_client():
 		_hint.text = "Jump to join or leave.  Waiting for the host to start."
 	_cable.snap = true
@@ -490,6 +536,8 @@ func _mod_info(mod: Dictionary) -> String:
 	var adds := []
 	if not mod.items.is_empty():
 		adds.append("%d item%s" % [mod.items.size(), "s" if mod.items.size() > 1 else ""])
+	if not mod.get("modes", {}).is_empty():
+		adds.append("%d mode%s" % [mod.modes.size(), "s" if mod.modes.size() > 1 else ""])
 	if mod.maps != "":
 		adds.append("maps")
 	if not mod.textures.is_empty():
@@ -499,6 +547,14 @@ func _mod_info(mod: Dictionary) -> String:
 	for p in mod.problems.slice(0, 2):
 		lines.append("! " + p)
 	return "\n".join(lines)
+
+
+func _cycle_mode(step: int) -> void:
+	var ids := Party.modes().keys()
+	var i := maxi(0, ids.find(Party.rules.mode))
+	Party.rules.mode = ids[posmod(i + step, ids.size())]
+	Party.save_weights()
+	_show("party_rules", true)
 
 
 func _set_bots(count: int, skill: int) -> void:
@@ -536,9 +592,9 @@ func _back() -> void:
 		_show("online")
 		_select(2)
 		return
-	if _screen in ["party_items", "mods"]:
-		var text: String = {"party_items": "Items", "mods": "Mods"}[_screen]
-		_show({"party_items": "party", "mods": "settings"}[_screen])
+	if _screen in ["party_items", "party_rules", "mods", "controls"]:
+		var text: String = {"party_items": "Items", "party_rules": "Rules", "mods": "Mods", "controls": "Controls"}[_screen]
+		_show({"party_items": "party", "party_rules": "party", "mods": "settings", "controls": "settings"}[_screen])
 		for i in _items.size():
 			if _items[i].text == text:
 				_select(i)
@@ -589,6 +645,19 @@ func _player_action(event: InputEvent, suffix: String) -> int:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouse:
 		return
+	if _capture != "":
+		# Settings > Controls: the next key pressed becomes the key.
+		if event is InputEventKey and event.pressed and not event.echo:
+			var k: Key = event.physical_keycode if event.physical_keycode != 0 else event.keycode
+			if k == KEY_ESCAPE:
+				_hint.text = ""
+			else:
+				var note := PlayerKeys.rebind(_controls_slot, _capture, k)
+				_hint.text = note if note != "" else "P%d %s: %s" % [_controls_slot, PlayerKeys.ACTION_NAMES[_capture], PlayerKeys.key_name(k)]
+			_capture = ""
+			_show("controls", true)
+		get_viewport().set_input_as_handled()
+		return
 	var stick := event is InputEventJoypadMotion
 	if stick and _nav_cooldown > 0.0:
 		return
@@ -613,6 +682,25 @@ func _unhandled_input(event: InputEvent) -> void:
 				GameState.join(toggler)
 				_lobby.joined_now(toggler)
 			_handled(stick); return
+		if not Net.is_online():
+			# Bots (party mode): left / right how many, up / down how good.
+			var step := 0
+			if event.is_action_pressed("ui_left", true) or _player_action(event, "move_left"):
+				step = -1
+			elif event.is_action_pressed("ui_right", true) or _player_action(event, "move_right"):
+				step = 1
+			if step != 0:
+				_set_bots(Party.bot_count + step, Party.bot_skill)
+				_lobby.queue_redraw()
+				_handled(stick); return
+			if event.is_action_pressed("ui_up", true) or _player_action(event, "move_up"):
+				_set_bots(Party.bot_count, (Party.bot_skill + 1) % 3)
+				_lobby.queue_redraw()
+				_handled(stick); return
+			if event.is_action_pressed("ui_down", true) or _player_action(event, "move_down"):
+				_set_bots(Party.bot_count, (Party.bot_skill + 2) % 3)
+				_lobby.queue_redraw()
+				_handled(stick); return
 		var enter: bool = event is InputEventKey and event.pressed and not event.echo \
 			and event.physical_keycode in [KEY_ENTER, KEY_KP_ENTER]
 		if enter or event.is_action_pressed("ui_cancel") or event.is_action_pressed("pause"):
@@ -661,6 +749,8 @@ class _Row extends Control:
 
 	## Where the cable plugs in: just after the option's name.
 	func socket() -> Vector2:
+		if index >= menu._items.size():
+			return Vector2.ZERO
 		var item: Dictionary = menu._items[index]
 		var w := UiTheme.FONT_BOLD.get_string_size(item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, item.get("size", TEXT_SIZE)).x
 		if item.has("value"):
@@ -675,6 +765,8 @@ class _Row extends Control:
 			queue_redraw()
 
 	func _draw() -> void:
+		if index >= menu._items.size():
+			return  # a row of the screen we just left, about to go
 		var item: Dictionary = menu._items[index]
 		var selected: bool = index == menu._index
 		var enabled: bool = item.get("enabled", true)
@@ -770,9 +862,16 @@ class _Lobby extends Control:
 	func _draw() -> void:
 		var cols := 4
 		var cell := Vector2(size.x / cols, 200)
+		# Bots take the free slots after the people (offline, party mode).
+		var bots := []
+		if not Net.is_online():
+			for s in range(1, GameState.MAX_PLAYERS + 1):
+				if bots.size() < Party.bot_count and not GameState.is_joined(s):
+					bots.append(s)
 		for i in GameState.MAX_PLAYERS:
 			var slot := i + 1
-			var joined := GameState.is_joined(slot)
+			var bot := slot in bots
+			var joined := GameState.is_joined(slot) or bot
 			var color: Color = PlayerSpawner.COLORS[i % 8]
 			var c := Vector2((i % cols + 0.5) * cell.x, (i / cols) * cell.y + 110)
 			# Button the player stands on.
@@ -787,10 +886,12 @@ class _Lobby extends Control:
 				var frame := 0 if t >= 1.0 else 7  # falling frame while dropping in
 				draw_texture_rect_region(TEX_PLAYER_BODY, r, Rect2(frame * 32, 0, 32, 32), color)
 				draw_texture_rect_region(TEX_PLAYER_FACE, r, Rect2(frame * 32, 0, 32, 32))
-			var label := "P%d" % slot
+			var label := ("Bot %d" % slot) if bot else ("P%d" % slot)
 			draw_string(UiTheme.FONT_BOLD, c + Vector2(-60, 44), label, HORIZONTAL_ALIGNMENT_CENTER, 120, 26,
 				UiTheme.INK if joined else Color("8a8796"))
 			var sub := "" if joined else UiTheme.jump_key_text(slot)
+			if bot:
+				sub = PartyBot.SKILL_NAMES[Party.bot_skill] + " (party)"
 			if Net.is_online():
 				sub = Net.name_of(slot) if joined else ""
 			draw_string(UiTheme.FONT_REGULAR, c + Vector2(-80, 68), sub, HORIZONTAL_ALIGNMENT_CENTER, 160, 18,

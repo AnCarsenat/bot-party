@@ -30,6 +30,9 @@ var turns := {}        # slot -> quarter turns (0-3) of the item being placed
 var mirrors := {}      # slot -> mirrored?
 var players := {}      # slot -> player
 var finished: Array[int] = []
+var _skip_when_running := false
+## How this party is played (Party > Rules > Mode; mods can add modes).
+var mode: PartyMode
 var trap_kills := {}   # owner slot -> kills this round
 var run_time := 0.0
 var modifier := ""
@@ -70,6 +73,8 @@ func _ready() -> void:
 	if Party.session.is_empty() and not Party.load_save():
 		Party.new_session(GameState.joined)  # arena started directly from the editor
 	slots = Party.players()
+	mode = Party.make_mode(str(Party.rule("mode")))
+	mode.setup(self)
 	for b in Party.bots():
 		if b in slots:
 			var bot := PartyBot.new(b, Party.bots()[b])
@@ -109,6 +114,71 @@ func give_item(slot: int, id: String) -> String:
 		_update_box()
 		return "P%d's box slot is now: %s" % [slot, id]
 	return "Only while picking or placing"
+
+
+## A mod item's script: a child node (its get_parent() is the item).
+static func _add_mod_script(item: Node, def: Dictionary) -> void:
+	if def.has("script"):
+		var behaviour := Node.new()
+		behaviour.name = "ModScript"
+		behaviour.set_script(load(def.script))
+		item.add_child(behaviour)
+
+
+## Console "place": `slot` places this item now, whatever the phase (while
+## racing, their robot waits until it's placed).
+func place_item(slot: int, id: String) -> String:
+	if phase == Phase.PICK or (phase == Phase.PLACE and ghosts.get(slot) != null):
+		return give_item(slot, id)
+	if not slot in slots:
+		return "P%d isn't in this party" % slot
+	if ghosts.get(slot) != null and is_instance_valid(ghosts[slot]):
+		ghosts[slot].queue_free()
+	var g := _make_ghost(id, slot)
+	var cam := _camera()
+	g.position = cam.get_screen_center_position() if cam else build_area.get_center()
+	cursor[slot] = g.position
+	turns[slot] = 0
+	mirrors[slot] = false
+	snapped.erase(slot)
+	_items.add_child(g)
+	ghosts[slot] = g
+	var p = players.get(slot)
+	if is_instance_valid(p):
+		p.set_physics_process(false)
+	return "P%d: place the %s (jump to put it down)" % [slot, Party.ITEMS[id].name]
+
+
+## For modes: stop the race now (scores as usual).
+func end_round() -> void:
+	if phase == Phase.RUN:
+		_start_score()
+
+
+## For modes: a big message in the middle of the screen.
+func say(text: String) -> void:
+	_banner.text = text
+
+
+## Console "next": on to the next round.
+func skip_round() -> String:
+	match phase:
+		Phase.PICK, Phase.PLACE:
+			for g in ghosts.values():
+				if is_instance_valid(g):
+					g.queue_free()
+			ghosts.clear()
+			Party.session.round += 1
+			Party.save()
+			_start_pick()
+			return "Skipped to round %d" % Party.session.round
+		Phase.COUNTDOWN:
+			_skip_when_running = true
+			return "Skipping once the race starts"
+		Phase.RUN:
+			_start_score()
+			return "Round over"
+	return "Already between rounds"
 
 
 ## Places an item right away (saved with the party).
@@ -170,7 +240,7 @@ func net_state() -> Dictionary:
 	var sess := Party.session
 	return {
 		"ph": int(phase),
-		"sess": [sess.get("round", 1), sess.get("scores", {}), sess.get("players", [])],
+		"sess": [sess.get("round", 1), sess.get("scores", {}), sess.get("players", []), sess.get("rules", {})],
 		"items": sess.get("items", []),
 		"box": [box, picks, cursors],
 		"ghosts": gh,
@@ -185,6 +255,8 @@ func net_apply(d: Dictionary) -> void:
 		Party.session.round = d.sess[0]
 		Party.session.scores = d.sess[1]
 		Party.session.players = d.sess[2]
+		if d.sess.size() > 3:
+			Party.session.rules = d.sess[3]
 		slots.clear()
 		for x in d.sess[2]:
 			slots.append(int(x))
@@ -314,11 +386,7 @@ func _spawn_item(id: String, pos: Vector2, owner_slot: int, record: Dictionary) 
 		item.name = "Item%d" % int(record.uid)  # same path on every computer (online)
 	parent.add_child(item)
 	item.set_meta("owner_slot", owner_slot)
-	if def.has("script"):
-		var behaviour := Node.new()  # a mod's script: get_parent() is the item
-		behaviour.name = "ModScript"
-		behaviour.set_script(load(def.script))
-		item.add_child(behaviour)
+	_add_mod_script(item, def)
 	for h in item.find_children("*", "Area2D", true, false):
 		if h is Hazard:
 			h.owner_slot = owner_slot
@@ -406,6 +474,10 @@ func _explode_fx(pos: Vector2, radius: float) -> void:
 
 func _start_pick() -> void:
 	phase = Phase.PICK
+	# Items used last round (mines that went off, crumbled blocks) come back.
+	for item in placed_items():
+		if item.has_method("reset_round"):
+			item.reset_round()
 	_last_scoreboard = []
 	_clear_players()
 	_set_title("Party, round %d" % Party.session.round)
@@ -495,6 +567,7 @@ func _make_ghost(id: String, slot: int) -> Node2D:
 		g = load(def.scene).instantiate()
 		for k in def.get("props", {}):
 			g.set(k, def.props[k])
+		_add_mod_script(g, def)  # so it looks right while being placed
 		g.process_mode = Node.PROCESS_MODE_DISABLED  # no collision, no movement while it's a ghost
 	g.set_meta("item_id", id)
 	g.set_meta("slot", slot)
@@ -532,15 +605,16 @@ func _start_countdown() -> void:
 	for item in placed_items():
 		if item.has_method("reset_round"):
 			item.reset_round()
-	for bolt in get_tree().get_nodes_in_group("bolts"):
+	for bolt in get_tree().get_nodes_in_group("bolts") + get_tree().get_nodes_in_group("planes"):
 		bolt.queue_free()  # still flying from before the round
-	_spawn_coin()
+	if Party.rule("coins"):
+		_spawn_coin()
 	# Some rounds get a surprise rule.
 	modifier = ""
 	if forced_modifier != "":
 		modifier = forced_modifier  # console
 		forced_modifier = ""
-	elif Party.session.round > 1 and _rng.randf() < 0.3:
+	elif Party.session.round > 1 and Party.rule("surprises") and _rng.randf() < 0.3:
 		var names := Party.MODIFIERS.keys()
 		modifier = names[_rng.randi_range(0, names.size() - 1)]
 	for i in slots.size():
@@ -567,6 +641,7 @@ func _start_countdown() -> void:
 			p.set_physics_process(true)
 	phase = Phase.RUN
 	run_time = 0.0
+	mode.round_started(self)
 	await get_tree().create_timer(0.7).timeout
 	if _banner.text == "Go!":
 		_banner.text = ""
@@ -608,6 +683,7 @@ func _start_score() -> void:
 			gains[s] += Party.POINTS_COIN
 	if is_instance_valid(_coin):
 		_coin.queue_free()
+	mode.score_round(self, gains)
 	var old := {}
 	for s in slots:
 		old[s] = Party.score(s)
@@ -621,7 +697,7 @@ func _start_score() -> void:
 	var best := -1
 	var winner := 0
 	for s in slots:
-		if Party.score(s) >= Party.TARGET_SCORE and Party.score(s) > best:
+		if Party.score(s) >= Party.target_score() and Party.score(s) > best:
 			best = Party.score(s)
 			winner = s
 	if winner != 0:
@@ -645,6 +721,8 @@ func _process(delta: float) -> void:
 		Phase.PICK: _process_pick()
 		Phase.PLACE: _process_place(delta)
 		Phase.RUN: _process_run(delta)
+	if phase != Phase.PLACE and not ghosts.is_empty():
+		_process_extra_ghosts(delta)
 
 
 func _pressed(slot: int, what: String) -> bool:
@@ -692,6 +770,25 @@ func _process_place(delta: float) -> void:
 		if g == null:
 			continue
 		all_done = false
+		_steer_ghost(slot, g, delta)
+	if all_done:
+		_start_countdown()
+
+
+## Ghosts handed out by the console "place" outside the place phase.
+func _process_extra_ghosts(delta: float) -> void:
+	for slot in ghosts.keys():
+		var g = ghosts[slot]
+		if g == null or not is_instance_valid(g):
+			continue
+		_steer_ghost(slot, g, delta)
+		if ghosts.get(slot) == null:
+			var p = players.get(slot)
+			if is_instance_valid(p):
+				p.set_physics_process(phase == Phase.RUN)  # placed: back to racing
+
+
+func _steer_ghost(slot: int, g: Node2D, delta: float) -> void:
 		var p := "p%d_" % slot
 		var dir := Vector2(Input.get_axis(p + "move_left", p + "move_right"), Input.get_axis(p + "move_up", p + "move_down"))
 		cursor[slot] = (cursor[slot] + dir * ghost_speed * delta).clamp(build_area.position, build_area.end)
@@ -706,8 +803,6 @@ func _process_place(delta: float) -> void:
 		g.modulate = Color(1, 1, 1, 0.85) if ok else Color(1, 0.35, 0.35, 0.6)
 		if ok and _pressed(slot, "action_1"):
 			_place(slot)
-	if all_done:
-		_start_countdown()
 
 
 ## Puts the ghost on the nearest free attachment point close to the cursor
@@ -734,8 +829,16 @@ func _snap(slot: int, g: Node2D) -> void:
 
 
 func _process_run(delta: float) -> void:
+	if _skip_when_running:
+		_skip_when_running = false
+		_start_score()
+		return
 	run_time += delta
-	var left := maxf(0.0, round_time - run_time)
+	mode.process(self, delta)
+	if phase != Phase.RUN:
+		return  # the mode ended the round
+	var limit: float = Party.rule("round_time") if Party.rule("round_time") > 0 else round_time
+	var left := maxf(0.0, limit - run_time)
 	_timer_label.text = "%d" % ceili(left)
 	var active := 0
 	for s in slots:
@@ -766,6 +869,7 @@ func _on_goal(body: Node) -> void:
 	create_tween().tween_property(body, "modulate:a", 0.0, 0.3)  # our tween: the body gets disabled
 	body.set_deferred("process_mode", Node.PROCESS_MODE_DISABLED)
 	_sub.text = "P%d made it!" % slot
+	mode.player_finished(self, slot)
 
 
 func _goal_fx() -> void:
@@ -1046,7 +1150,7 @@ func _show_scoreboard(old: Dictionary, gains: Dictionary) -> void:
 	col.add_theme_constant_override("separation", 10)
 	panel.add_child(col)
 	var head := Label.new()
-	head.text = "First to %d points wins" % Party.TARGET_SCORE
+	head.text = "First to %d points wins" % Party.target_score()
 	head.add_theme_color_override("font_color", UiTheme.MUTED)
 	col.add_child(head)
 	for s in slots:
@@ -1066,9 +1170,9 @@ func _show_scoreboard(old: Dictionary, gains: Dictionary) -> void:
 		var bar := ColorRect.new()
 		bar.color = PlayerSpawner.COLORS[(s - 1) % 8]
 		bar.position = Vector2(3, 3)
-		bar.size = Vector2(434.0 * minf(1.0, float(old[s]) / Party.TARGET_SCORE), 24)
+		bar.size = Vector2(434.0 * minf(1.0, float(old[s]) / Party.target_score()), 24)
 		bar_bg.add_child(bar)
-		var target := 434.0 * minf(1.0, float(Party.score(s)) / Party.TARGET_SCORE)
+		var target := 434.0 * minf(1.0, float(Party.score(s)) / Party.target_score())
 		bar.create_tween().tween_property(bar, "size:x", target, 0.8).set_delay(0.4)
 		var pts := Label.new()
 		pts.add_theme_font_override("font", UiTheme.FONT_BOLD)

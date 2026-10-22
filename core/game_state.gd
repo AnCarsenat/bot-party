@@ -82,7 +82,7 @@ func leave(slot: int) -> void:
 		save_settings()
 var current_level: int = -1
 ## Player-facing options, saved with the progress.
-var settings := {"music_volume": 0.8, "sfx_volume": 0.8, "fullscreen": false}
+var settings := {"music_volume": 0.8, "sfx_volume": 0.8, "fullscreen": false, "distant_players": true}
 ## Campaign id -> how many of its levels can be picked in the menu (1 = only the first).
 var _unlocked := {}
 var unlocked: int:
@@ -110,6 +110,7 @@ func campaign() -> Dictionary:
 
 func _ready() -> void:
 	_load()
+	PlayerKeys.load_saved()
 	# When a level scene is run directly from the editor (F6), remember which one it is.
 	var scene := get_tree().current_scene
 	if scene:

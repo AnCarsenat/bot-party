@@ -6,8 +6,12 @@ class_name ArenaMap
 ##   "planks": [[x, y, w], ...],              one-way platforms (jump through from below)
 ##   "start":  [x, y, w, h],                  start area (players spawn here, no building)
 ##   "goal":   [x, y],                        where the flag stands (on the ground)
+##   "items":  [{"id": "saw", "x": 900, "y": 300, "rot": 0, "mirror": false}, ...],
+##             party items already in place when the party starts (optional)
 ##   "wind": false, "meteors": false
 ## }
+## A map can also be a .tscn made from editor/arena_template.tscn (ArenaSource):
+## it's read the same way (see load_file).
 ## Format 1 files had "blocks": [[x, y, w, h], ...] instead of "ground"; they still load.
 ## custom_arena.tscn builds the playable arena from it.
 
@@ -24,6 +28,7 @@ static func blank(name := "New map") -> Dictionary:
 		"planks": [],
 		"start": [-160, 384, 416, 192],
 		"goal": [2048, 384],
+		"items": [],
 		"wind": false, "meteors": false,
 	}
 
@@ -59,10 +64,25 @@ static func save_to(map: Dictionary, path: String) -> void:
 
 
 static func load_file(path: String) -> Dictionary:
+	if path.ends_with(".tscn") or path.ends_with(".scn"):
+		return load_scene(path)
 	if not FileAccess.file_exists(path):
 		return {}
 	var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 	return normalize(data) if data is Dictionary else {}
+
+
+## A map made in Godot (a scene whose root is an ArenaSource).
+static func load_scene(path: String) -> Dictionary:
+	if not ResourceLoader.exists(path):
+		return {}
+	var packed = load(path)
+	if not packed is PackedScene:
+		return {}
+	var root = packed.instantiate()
+	var m: Dictionary = root.to_map() if root.has_method("to_map") else {}
+	root.free()
+	return m
 
 
 ## Every map file: your own (user://maps) and the ones from mods. [{name, path, mod}]
@@ -73,7 +93,7 @@ static func list_all() -> Array:
 		if not DirAccess.dir_exists_absolute(dir):
 			continue
 		for f in DirAccess.get_files_at(dir):
-			if f.ends_with(".json"):
+			if f.ends_with(".json") or f.ends_with(".tscn"):
 				var m := load_file(dir.path_join(f))
 				if not m.is_empty():
 					out.append({"name": m.name, "path": dir.path_join(f), "mod": dir != DIR})
@@ -111,6 +131,13 @@ static func normalize(data: Dictionary) -> Dictionary:
 			if p is Array and p.size() >= 3:
 				planks.append([int(p[0]), int(p[1]), maxi(32, int(p[2]))])
 	m.planks = planks
+	var items := []
+	if m.items is Array:
+		for it in m.items:
+			if it is Dictionary and it.has("id"):
+				items.append({"id": str(it.id), "x": int(it.get("x", 0)), "y": int(it.get("y", 0)),
+					"rot": posmod(int(it.get("rot", 0)), 4), "mirror": bool(it.get("mirror", false))})
+	m.items = items
 	m.start = (m.start as Array).map(func(v): return int(v))
 	m.goal = (m.goal as Array).map(func(v): return int(v))
 	m.wind = bool(m.wind)
@@ -159,6 +186,19 @@ static func build_area(m: Dictionary) -> Rect2:
 	for p in m.planks:
 		r = r.merge(plank_rect(p))
 	return r.grow_individual(160, 420, 160, 120)
+
+
+## A map item's footprint (like the party controller's).
+static func item_rect(it: Dictionary) -> Rect2:
+	var party := (Engine.get_main_loop() as SceneTree).root.get_node_or_null("Party")
+	var def: Dictionary = party.ITEMS.get(it.id, {}) if party else {}
+	var size: Vector2 = def.get("size", Vector2(64, 64))
+	var offset: Vector2 = def.get("offset", Vector2.ZERO)
+	var rot := int(it.get("rot", 0))
+	if rot % 2 == 1:
+		size = Vector2(size.y, size.x)
+	offset = offset.rotated(rot * PI / 2.0)
+	return Rect2(Vector2(it.x, it.y) + offset - size / 2.0, size)
 
 
 static func spawn_origin(m: Dictionary) -> Vector2:

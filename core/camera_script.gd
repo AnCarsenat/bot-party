@@ -21,6 +21,12 @@ extends Camera2D
 @export var zoom_margin: Vector2 = Vector2(500, 380)
 @export var zoom_speed: float = 3.0
 
+func _ready() -> void:
+	# Bubbles for robots off the screen (Settings > Distant players).
+	if not Engine.is_editor_hint() and DisplayServer.get_name() != "headless":
+		add_child(DistantPlayers.new())
+
+
 func _process(delta: float) -> void:
 	var players = get_tree().get_nodes_in_group(player_group)
 	var total_position := Vector2.ZERO

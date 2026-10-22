@@ -67,6 +67,15 @@ func items() -> Dictionary:
 	return out
 
 
+## Game modes of every enabled mod ({"<mod>.<mode>": {name, description, script}}).
+func modes() -> Dictionary:
+	var out := {}
+	for m in mods:
+		if m.enabled:
+			out.merge(m.get("modes", {}))
+	return out
+
+
 ## Folders with map files from enabled mods (ArenaMap.list_all reads them).
 func map_dirs() -> Array:
 	var out := []
@@ -81,7 +90,7 @@ func map_dirs() -> Array:
 func required() -> Array:
 	var out := []
 	for m in mods:
-		if m.enabled and not m.items.is_empty():
+		if m.enabled and (not m.items.is_empty() or not m.get("modes", {}).is_empty()):
 			out.append("%s@%s" % [m.id, m.version])
 	return out
 
@@ -119,6 +128,17 @@ func _read(path: String) -> Dictionary:
 				m.problems.append("Missing file %s" % tex[game_path])
 			else:
 				m.textures[full] = path.path_join(str(tex[game_path]))
+	m.modes = {}
+	var modes = data.get("modes", {})
+	if modes is Dictionary:
+		for mode_id in modes:
+			var d = modes[mode_id]
+			var script := _file(m, str(d.get("script", ""))) if d is Dictionary else ""
+			if not script.ends_with(".gd") or not FileAccess.file_exists(script):
+				m.problems.append("Mode %s: script not found" % mode_id)
+				continue
+			m.modes["%s.%s" % [id, ArenaMap.slug(str(mode_id))]] = {"name": str(d.get("name", mode_id)).left(24),
+				"description": str(d.get("description", "")).left(160), "script": script, "mod": id}
 	var items = data.get("items", {})
 	if items is Dictionary:
 		for item_id in items:

@@ -18,10 +18,10 @@ const BODY := Vector2(82, 82)  # the player's collision box (player.tscn)
 const STEP := 1              # simulated frames per step
 const ACTIONS := ["move_left", "move_right", "move_up", "move_down", "action_1", "action_2", "action_3"]
 ## How much the bot likes each item (traps first). Unknown items (mods): 2.
-const LIKES := {"saw": 4.0, "crossbow": 3.5, "flamer": 3.0, "planes": 3.0, "spikes": 2.5, "mine": 2.5,
+const LIKES := {"saw": 4.0, "crossbow": 3.5, "flamer": 3.0, "planes": 1.2, "spikes": 2.5, "mine": 2.5,
 	"pendulum": 2.0, "ferris": 1.5, "slider": 1.5, "fan": 2.0, "conveyor": 1.5, "crumble": 1.5,
 	"block": 1.2, "plank": 1.0, "trampoline": 1.0, "lift": 1.0, "bomb": 1.5, "nuke": 2.5}
-const TRAPS := ["saw", "crossbow", "flamer", "planes", "spikes", "mine", "pendulum", "crumble", "fan", "conveyor"]
+const TRAPS := ["saw", "crossbow", "flamer", "spikes", "mine", "pendulum", "crumble", "fan", "conveyor"]
 
 var slot := 0
 var skill: int = Skill.NORMAL
@@ -47,6 +47,8 @@ var _plan: Array = []      # per frame: [dir, jump held]
 var _commit := 0
 var _dangers: Array = []   # [Rect2 now, Vector2 velocity, trap that switches on and off or null]
 var _dangers_age := 99
+var _fans: Array = []      # [Rect2, push direction, strength, max speed]
+var _pads: Array = []      # trampolines: [Rect2, up direction, bounce speed]
 var _seen_at := {}         # hazard shape id -> [where it was, physics frame] (to see it move)
 var _best := INF
 var _stuck := 0.0
@@ -275,7 +277,7 @@ func _physics_process(_delta: float) -> void:
 ## The plans worth trying from here, as per-frame inputs.
 func _candidates(p: Node) -> Array:
 	var out := []
-	var long := [6, 12, 24]
+	var long := [6, 12, 24, 40]
 	# A jump needs a fresh press: let go for a frame first if the key is still down.
 	var now := 1 if _held.has("p%d_action_1" % slot) else 0
 	if p.is_on_floor() or p.coyote_timer > 0.0:
@@ -283,8 +285,13 @@ func _candidates(p: Node) -> Array:
 			out.append(_inputs(dir, 0, 0, 30))
 		for dir in [-1, 1]:
 			for hold in long:
-				out.append(_inputs(dir, now, hold, 46))
-			out.append(_inputs(dir, 8, 24, 52))  # run up, then jump
+				out.append(_inputs(dir, now, hold, 56))
+			out.append(_inputs(dir, 8, 24, 60))  # run up, then jump
+			# High jump, then stop moving sideways (land short, before a trap).
+			for stop in [12, 22]:
+				out.append(_inputs(dir, now, 40, 56, stop))
+			# Straight up first, then sideways (hop onto a ledge right above).
+			out.append(_inputs(0, now, 40, 56, -1, 14, dir))
 		out.append(_inputs(0, now, 24, 46))      # straight up
 	else:
 		var rising: bool = p.velocity.y < 0.0
@@ -295,17 +302,26 @@ func _candidates(p: Node) -> Array:
 	return out
 
 
-func _inputs(dir: int, jump_after: int, hold: int, frames: int) -> Array:
+## Per-frame keys: `dir` sideways, jump held from `jump_after` for `hold` frames.
+## `stop`: sideways keys let go from that frame. `turn_at`/`then`: switch to
+## direction `then` from that frame.
+func _inputs(dir: int, jump_after: int, hold: int, frames: int, stop := -1, turn_at := -1, then := 0) -> Array:
 	var steps := []
 	for f in frames:
 		var jump := hold > 0 and f >= jump_after and f < jump_after + hold
-		steps.append([dir, jump])
+		var d := dir
+		if stop >= 0 and f >= stop:
+			d = 0
+		if turn_at >= 0 and f >= turn_at:
+			d = then
+		steps.append([d, jump])
 	return steps
 
 
 func _make_plan(p: Node) -> void:
 	if _dangers_age > 6:
 		_dangers = _find_dangers(p)
+		_find_pushers()
 		_dangers_age = 0
 	_dangers_age += 1
 	var scored := []
@@ -372,6 +388,8 @@ func _score(sim: Dictionary, plan: Array) -> float:
 	var score := d
 	if not sim.floor:
 		score += 1.5
+	if sim.get("crumble", false):
+		score += 2.0  # don't stop on a crumbling block
 	if plan[0][1] or plan[mini(10, plan.size() - 1)][1]:
 		score += 0.3  # don't jump for nothing
 	return score
@@ -389,6 +407,8 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 	var dt := STEP / 60.0
 	var cam = ctl._camera()
 	var airborne := false
+	var floor_vel := Vector2.ZERO
+	var on_crumble := false
 	var i := 0
 	# The plan stops at its end or when we land after a jump. Then no keys: we
 	# must come to rest on the ground (a plan ending over a pit, or landing so
@@ -422,8 +442,23 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 			jumping = false
 		var accel: float = p.ground_accel if on_floor else p.air_accel
 		vel.x = move_toward(vel.x, dir * p.speed + p.wind_vx, accel * dt)
-		# Move and slide (twice: along a wall or the floor after a hit).
-		var motion := vel * dt
+		# Fans blow, trampolines launch (as fan.gd and trampoline.gd do).
+		for f in _fans:
+			if f[0].has_point(pos):
+				var along: float = vel.dot(f[1])
+				if along < f[3]:
+					vel += f[1] * minf(f[2] * dt, f[3] - along)
+		for t in _pads:
+			if t[0].has_point(pos) and vel.dot(t[1]) <= 10.0:
+				var v: Vector2 = t[1] * t[2]
+				if absf(t[1].y) > 0.3:
+					vel.y = v.y
+				vel.x += v.x
+				jumping = false
+				on_floor = false
+		# Move and slide (twice: along a wall or the floor after a hit). Standing
+		# on a conveyor or a moving plane carries us along.
+		var motion := vel * dt + floor_vel * dt
 		for k in 2:
 			_motion.from = Transform2D(0.0, pos)
 			_motion.motion = motion
@@ -445,22 +480,77 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 		_motion.motion = Vector2(0, 2)
 		on_floor = vel.y >= 0.0 and PhysicsServer2D.body_test_motion(p.get_rid(), _motion, _result) \
 			and _result.get_collision_normal().y < -0.6
+		floor_vel = Vector2.ZERO
 		if on_floor:
 			vel.y = 0.0
+			var under = _result.get_collider()
+			if under is StaticBody2D:
+				floor_vel = under.constant_linear_velocity
+			if under != null and "delay" in under and "_broken" in under:
+				on_crumble = true  # it'll give way
 		if not on_floor:
 			airborne = true
 		for d in _dangers:
 			# Where that trap or bolt will be by then.
 			if d[2] != null and is_instance_valid(d[2]) and not d[2].firing_in(i / 60.0 + [0.0, 0.1, 0.15][skill]):
 				continue
-			if d[0].has_point(pos - d[1] * (i / 60.0)):
+			if _moved(d, i / 60.0).has_point(pos):
 				return {"pos": pos, "dead": true, "floor": on_floor, "frames": stop_at, "at": i}
 		if cam and cam.has_method("is_out_of_bounds") and cam.is_out_of_bounds(pos):
 			return {"pos": pos, "dead": true, "floor": false, "frames": stop_at, "at": i}
 		if airborne and on_floor and not floor_was and i > 6 and i < stop_at:
 			stop_at = i + 1  # landed
 		i += STEP
-	return {"pos": pos, "dead": false, "floor": on_floor, "frames": stop_at}
+	return {"pos": pos, "dead": false, "floor": on_floor, "frames": stop_at, "crumble": on_crumble and on_floor}
+
+
+## Where a danger will be `t` seconds from now (bouncing back and forth on its track).
+func _moved(d: Array, t: float) -> Rect2:
+	var r: Rect2 = d[0]
+	var v: Vector2 = d[1]
+	if v == Vector2.ZERO:
+		return r
+	var c := r.get_center() + v * t
+	if d[3] != null:
+		var track: Rect2 = d[3]
+		var lo := track.position + r.size / 2.0
+		var hi := track.end - r.size / 2.0
+		c = Vector2(_bounce(c.x, lo.x, hi.x), _bounce(c.y, lo.y, hi.y))
+	return Rect2(c - r.size / 2.0, r.size)
+
+
+## Folds `x` back into [lo, hi] like something bouncing between two walls.
+static func _bounce(x: float, lo: float, hi: float) -> float:
+	if hi <= lo:
+		return (lo + hi) / 2.0
+	var span := hi - lo
+	var k := fposmod(x - lo, span * 2.0)
+	return lo + (k if k <= span else span * 2.0 - k)
+
+
+## The party item a node belongs to (the ancestor with a placement record).
+func _item_of(n: Node) -> Node:
+	while n != null and n != ctl:
+		if n.has_meta("record"):
+			return n
+		n = n.get_parent()
+	return null
+
+
+## Fans and trampolines, to know where we'd be pushed.
+func _find_pushers() -> void:
+	_fans.clear()
+	_pads.clear()
+	for n in ctl.get_parent().find_children("*", "Node2D", true, false):
+		if n is Trampoline and n.has_node("Pad"):
+			for c in n.get_node("Pad").get_children():
+				if c is CollisionShape2D and c.shape:
+					_pads.append([c.global_transform * c.shape.get_rect(), Vector2.UP.rotated(n.global_rotation), n.bounce_speed])
+		elif "max_up_speed" in n and n.has_node("Column"):
+			var up: Vector2 = -n.global_transform.y.normalized()
+			for c in n.get_node("Column").get_children():
+				if c is CollisionShape2D and c.shape:
+					_fans.append([c.global_transform * c.shape.get_rect(), up, n.strength, n.max_up_speed])
 
 
 ## Areas that take players out (grown by the player's size), and projectiles.
@@ -486,17 +576,24 @@ func _find_dangers(p: Node) -> Array:
 				var v := Vector2.ZERO
 				if seen and now > seen[1]:
 					v = (r.get_center() - seen[0]) / ((now - seen[1]) / 60.0)
-				out.append([r.grow_individual(half.x + margin, half.y + margin, half.x + margin, half.y + margin), v, timed])
+				# A trap going back and forth (a saw on its rail) stays on its track.
+				var track = null
+				var item := _item_of(h)
+				if item and v != Vector2.ZERO and not item.get_meta("record", {}).has("host"):
+					var rec: Dictionary = item.get_meta("record")
+					track = ctl._footprint(rec.id, Vector2(rec.x, rec.y), int(rec.get("rot", 0)))
+				out.append([r.grow_individual(half.x + margin, half.y + margin, half.x + margin, half.y + margin), v, timed,
+					track.grow_individual(half.x + margin, half.y + margin, half.x + margin, half.y + margin) if track else null])
 		# Mines blow up around them.
 		var blast = h.get_parent().get("radius") if h.get_parent() else null
 		if blast is float and h.get_parent().has_method("_on_touch"):
 			var c: Vector2 = h.get_parent().global_position
-			out.append([Rect2(c, Vector2.ZERO).grow(blast + margin), Vector2.ZERO, null])
+			out.append([Rect2(c, Vector2.ZERO).grow(blast + margin), Vector2.ZERO, null, null])
 	for b in get_tree().get_nodes_in_group("bolts"):
 		if b is Node2D:
 			var v = b.get("velocity")
 			out.append([Rect2(b.global_position, Vector2.ZERO).grow_individual(half.x + 24, half.y + 24, half.x + 24, half.y + 24),
-				v if v is Vector2 else Vector2.ZERO, null])
+				v if v is Vector2 else Vector2.ZERO, null, null])
 	return out
 
 

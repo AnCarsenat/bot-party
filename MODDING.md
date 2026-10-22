@@ -181,6 +181,47 @@ A map file looks like this (format 2):
 self-crossing). `planks` are `[x, y, width]`, `start` is `[x, y, width,
 height]` and `goal` is where the flag stands, on top of ground.
 
+### Items in maps
+
+Maps can come with party items already in place (they're there from the start
+of every party on that map, and can be blown up like the others). In the map
+editor, drag them from the **Items** tab; T turns them, M flips them. In a file:
+
+```json
+"items": [ {"id": "saw", "x": 900, "y": 300, "rot": 0, "mirror": false} ]
+```
+
+`rot` is in quarter turns (0 to 3). Items from mods use their full id
+(`my-mod.rocket`).
+
+### Maps as Godot scenes
+
+A map can also be a `.tscn` made from `editor/arena_template.tscn`: put it in a
+`maps` folder (yours or a mod's) and it's listed like the `.json` ones. Party
+items go under its `Items` node as instances of the item scenes.
+
+### Game modes
+
+A mod can add ways to play party mode (Party > Rules > Mode):
+
+```json
+"modes": {
+  "sudden_death": {
+    "name": "Sudden death",
+    "description": "First to the flag takes 15 points and ends the round.",
+    "script": "sudden_death.gd"
+  }
+}
+```
+
+The script extends `PartyMode` (`party/party_mode.gd`) and overrides the hooks it
+needs: `setup`, `round_started`, `process`, `player_finished` and `score_round`
+(which can change the points of the round). Through `ctl` it can read
+`ctl.slots`, `ctl.players`, `ctl.finished` and `ctl.run_time`, and call
+`ctl.end_round()` and `ctl.say(text)`. The example mod's `sudden_death.gd` is
+about ten lines long. Online, everyone needs a mod that adds modes, like mods
+that add items.
+
 ### Textures
 
 `"textures"` maps a game texture to a picture in your mod folder:
@@ -197,7 +238,7 @@ Texture changes show up after restarting the game.
 
 ## Online
 
-To join an online game, you need every **item** mod the host has switched on,
+To join an online game, you need every mod with **items or modes** the host has switched on,
 with the same version. Otherwise the game says which mods are missing. Maps
 travel with the game, and textures are only looks, so mods with just maps or
 textures are never needed by other players.

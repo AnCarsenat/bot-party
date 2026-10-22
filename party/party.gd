@@ -3,7 +3,10 @@ extends Node
 ## The session is saved after every placement and every round, so a party can be
 ## continued from the main menu, or after "Restart level" in the pause menu.
 
-const TARGET_SCORE := 50
+const TARGET_SCORE := 50  # default "First to" score (see rules)
+## Party rules (Party > Rules). Each party keeps the rules it started with.
+const RULE_DEFAULTS := {"target": 50, "round_time": 0, "coins": true, "surprises": true, "equal_odds": false, "mode": "classic"}
+var rules := RULE_DEFAULTS.duplicate()
 const SAVE_PATH := "user://party_session.json"
 ## Arenas a party can be played in (one is picked at random for each new party).
 const ARENAS := ["res://party/party_arena.tscn", "res://party/party_arena_2.tscn",
@@ -105,17 +108,55 @@ func pick_item(rng: RandomNumberGenerator, skip: Array = []) -> String:
 	var total := 0
 	for k in ITEMS:
 		if not k in skip:
-			total += weight(k)
+			total += _odds(k)
 	if total <= 0:
 		return "block"
 	var roll := rng.randi_range(1, total)
 	for k in ITEMS:
 		if k in skip:
 			continue
-		roll -= weight(k)
+		roll -= _odds(k)
 		if roll <= 0:
 			return k
 	return "block"
+
+
+## How likely an item is in the box: its weight, or the same for every item that's
+## on when the "Equal odds" rule is on.
+func _odds(id: String) -> int:
+	if rule("equal_odds"):
+		return 1 if weight(id) > 0 else 0
+	return weight(id)
+
+
+## Game modes: "classic", plus the ones from enabled mods ({id: {name, description, script}}).
+func modes() -> Dictionary:
+	var out := {"classic": {"name": "Classic", "description": PartyMode.new().description}}
+	var mods := get_node_or_null("/root/Mods")
+	if mods:
+		out.merge(mods.modes())
+	return out
+
+
+## The mode with this id (Classic if it's unknown, e.g. its mod was turned off).
+func make_mode(id: String) -> PartyMode:
+	var def: Dictionary = modes().get(id, {})
+	if def.has("script"):
+		var script = load(def.script)
+		if script is Script:
+			var m = script.new()
+			if m is PartyMode:
+				return m
+	return PartyMode.new()
+
+
+## A rule of the party being played (or of the next one, between parties).
+func rule(name: String):
+	return session.get("rules", rules).get(name, RULE_DEFAULTS[name])
+
+
+func target_score() -> int:
+	return int(rule("target"))
 
 
 func save_weights() -> void:
@@ -125,6 +166,8 @@ func save_weights() -> void:
 	cfg.set_value("party", "arena", arena_choice)
 	cfg.set_value("party", "bots", bot_count)
 	cfg.set_value("party", "bot_skill", bot_skill)
+	for k in rules:
+		cfg.set_value("rules", k, rules[k])
 	cfg.save(ITEMS_PATH)
 
 
@@ -135,6 +178,8 @@ func load_weights() -> void:
 		arena_choice = str(cfg.get_value("party", "arena", "random"))
 		bot_count = clampi(int(cfg.get_value("party", "bots", 0)), 0, GameState.MAX_PLAYERS - 1)
 		bot_skill = clampi(int(cfg.get_value("party", "bot_skill", 1)), 0, 2)
+		for k in RULE_DEFAULTS:
+			rules[k] = type_convert(cfg.get_value("rules", k, RULE_DEFAULTS[k]), typeof(RULE_DEFAULTS[k]))
 	if cfg.load(ITEMS_PATH) == OK and cfg.has_section("weights"):
 		for k in cfg.get_section_keys("weights"):
 			if ITEMS.has(k):
@@ -154,7 +199,7 @@ func new_session(players: Array, choice := "") -> void:
 	var scores := {}
 	for s in players:
 		scores[str(s)] = 0
-	session = {"round": 1, "scores": scores, "players": players.duplicate(), "items": [],
+	session = {"round": 1, "scores": scores, "players": players.duplicate(), "items": [], "rules": rules.duplicate(),
 		"arena": ARENAS[randi() % ARENAS.size()]}
 	# Bots take the free slots after the people.
 	var bots := {}
@@ -181,6 +226,15 @@ func new_session(players: Array, choice := "") -> void:
 func use_map(m: Dictionary) -> void:
 	session.arena = ArenaMap.SCENE
 	session.map = m
+	# Items that come with the map are there from the start (anyone's to blow up).
+	session.items = []
+	var uid := 1
+	for it in m.get("items", []):
+		if ITEMS.has(it.id) and not ITEMS[it.id].get("bomb", false):
+			session.items.append({"id": it.id, "x": float(it.x), "y": float(it.y), "owner": 0,
+				"rot": int(it.get("rot", 0)), "mirror": bool(it.get("mirror", false)), "uid": uid})
+			uid += 1
+	session.next_uid = uid
 
 
 ## Arena choices for the menu: [{id, name}].

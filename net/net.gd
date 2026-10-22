@@ -36,6 +36,8 @@ var mode := Mode.OFFLINE
 var roster: Array = []
 ## Who you are, and where the server list lives (saved in user://online.cfg).
 var player_name := "Player"
+## UDP port to host on (Online > Port, or --port on the command line).
+var host_port := GAME_PORT
 var lobby_url := ""
 var server_name := ""
 
@@ -129,15 +131,15 @@ func host(public: bool) -> Error:
 	leave()
 	_peer = ENetMultiplayerPeer.new()
 	var err := ERR_CANT_CREATE
-	var port := GAME_PORT
+	var port := host_port
 	for k in 5:
-		err = _peer.create_server(GAME_PORT + k, MAX_CLIENTS)
+		err = _peer.create_server(host_port + k, MAX_CLIENTS)
 		if err == OK:
 			_peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
-			port = GAME_PORT + k
+			port = host_port + k
 			break
 	if err != OK:
-		status.emit("Can't open port %d" % GAME_PORT)
+		status.emit("Can't open port %d" % host_port)
 		return err
 	multiplayer.multiplayer_peer = _peer
 	mode = Mode.HOST
@@ -899,6 +901,7 @@ func save_config() -> void:
 	var cfg := ConfigFile.new()
 	cfg.set_value("online", "name", player_name)
 	cfg.set_value("online", "lobby_url", lobby_url)
+	cfg.set_value("online", "port", host_port)
 	cfg.save(CONFIG_PATH)
 
 
@@ -907,3 +910,4 @@ func _load_config() -> void:
 	if cfg.load(CONFIG_PATH) == OK:
 		player_name = cfg.get_value("online", "name", player_name)
 		lobby_url = cfg.get_value("online", "lobby_url", lobby_url)
+		host_port = clampi(int(cfg.get_value("online", "port", host_port)), 1024, 65535)

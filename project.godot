@@ -31,6 +31,7 @@ Hud="*res://ui/hud.gd"
 Party="*res://party/party.gd"
 Net="*res://net/net.gd"
 Console="*res://ui/console.gd"
+CommandLine="*res://core/command_line.gd"
 
 [display]
 

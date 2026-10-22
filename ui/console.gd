@@ -32,6 +32,7 @@ func _ready() -> void:
 
 func _build() -> void:
 	var root := Control.new()
+	root.name = "UiRoot"
 	root.theme = UiTheme.make()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -39,7 +40,7 @@ func _build() -> void:
 
 	_panel = PanelContainer.new()
 	_panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	_panel.offset_bottom = 330
+	_panel.offset_bottom = 240
 	_panel.self_modulate.a = 0.8  # see the game through it (the text stays solid)
 	_panel.hide()
 	root.add_child(_panel)
@@ -49,13 +50,13 @@ func _build() -> void:
 	_log.bbcode_enabled = true
 	_log.scroll_following = true
 	_log.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_log.add_theme_font_size_override("normal_font_size", 18)
-	_log.add_theme_font_size_override("bold_font_size", 18)
+	_log.add_theme_font_size_override("normal_font_size", 16)
+	_log.add_theme_font_size_override("bold_font_size", 16)
 	_log.add_theme_color_override("default_color", UiTheme.INK)
 	col.add_child(_log)
 	_line = LineEdit.new()
 	_line.placeholder_text = "command  (help)"
-	_line.add_theme_font_size_override("font_size", 20)
+	_line.add_theme_font_size_override("font_size", 17)
 	_line.text_submitted.connect(_submit)
 	_line.gui_input.connect(_on_input_key)
 	col.add_child(_line)
@@ -240,6 +241,10 @@ func _add(name: String, usage: String, help: String, fn: Callable) -> void:
 
 # --- Helpers -----------------------------------------------------------------------------
 
+func _ui_root() -> Control:
+	return get_node("UiRoot")
+
+
 func _scene() -> Node:
 	return get_tree().current_scene
 
@@ -309,12 +314,36 @@ func _register_all() -> void:
 		toggle(false)
 		GameState.start_level(i)
 		return "")
-	_add("next", "next", "Finish this level (go to the next one).", func(_a):
-		if _scene() == null or not _scene().has_node("Game") or _ctl():
-			return "Not in a campaign level"
+	_add("next", "next", "Finish this level, or (party) skip to the next round.", func(_a):
+		if _ctl():
+			return _ctl().skip_round()
+		if _scene() == null or not _scene().has_node("Game"):
+			return "Not in a level"
 		toggle(false)
 		GameState.complete_level()
 		return "")
+	_add("inspect", "inspect [node path]", "Open the inspector: nodes and their properties, editable live.", func(a):
+		var ins = _ui_root().get_node_or_null("Inspector")
+		if ins == null:
+			ins = Inspector.new()
+			ins.name = "Inspector"
+			_ui_root().add_child(ins)
+		if a.size() > 0 and _scene():
+			var n = _scene().get_node_or_null(NodePath(_arg(a, 0)))
+			if n == null:
+				return "No node " + _arg(a, 0)
+			ins.select.call_deferred(n)
+		return "Inspector open (Pick, then click something in the game)")
+	_add("savestate", "savestate [name]", "Save where everyone is (level, party, crates).", func(a):
+		return SaveStates.save(get_tree(), _arg(a, 0, "quick")))
+	_add("loadstate", "loadstate [name]", "Go back to a saved state.", func(a):
+		if Net.is_client():
+			return "Online, only the host can"
+		toggle(false)
+		return SaveStates.load_state(get_tree(), _arg(a, 0, "quick")))
+	_add("states", "states", "List the saved states.", func(_a):
+		var l := SaveStates.list()
+		return "No saved states yet (savestate [name])" if l.is_empty() else ", ".join(l))
 	_add("restart", "restart", "Restart the level.", func(_a): toggle(false); GameState.restart_level(); return "")
 	_add("menu", "menu", "Back to the menu.", func(_a): toggle(false); GameState.go_to_menu(); return "")
 	_add("players", "players <1-8>", "How many players play on this computer (offline).", func(a):
@@ -343,13 +372,15 @@ func _register_all() -> void:
 		Party.save_weights()
 		return "%d bots, %s (from the next new party)" % [Party.bot_count, PartyBot.SKILL_NAMES[Party.bot_skill]])
 	_add("items", "items", "List party item names.", func(_a): return ", ".join(Party.ITEMS.keys()))
-	_add("give", "give <item> [player]", "Party: give a player this item (while picking or placing).", func(a):
+	var place_fn := func(a):
 		if not _ctl():
 			return "Not in party mode"
 		var id := _arg(a, 0)
 		if not Party.ITEMS.has(id):
 			return "Unknown item. Try: items"
-		return _ctl().give_item(int(_arg(a, 1, "1").trim_prefix("p")), id))
+		return _ctl().place_item(int(_arg(a, 1, "1").trim_prefix("p")), id)
+	_add("place", "place <item> [player]", "Party: a player places this item now (any time, even mid-race).", place_fn)
+	_add("give", "give <item> [player]", "Same as place.", place_fn)
 	_add("spawn", "spawn <item> [x y]", "Party: place an item now (middle of the screen, or at x y).", func(a):
 		if not _ctl():
 			return "Not in party mode"

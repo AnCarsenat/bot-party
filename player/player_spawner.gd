@@ -19,8 +19,12 @@ const COLORS: Array[Color] = [
 var players: Array[CharacterBody2D] = []
 
 
-## Players who haven't joined can press their jump key during the level to drop in.
+## Online: people who join while the level runs appear in it.
 @export var allow_drop_in: bool = true
+## Local players who haven't joined drop in by pressing their jump key. Off: people
+## join from the Players screen, so a stray key press doesn't add a robot (and
+## change the campaign for a bigger group).
+@export var keyboard_drop_in: bool = false
 ## Spawn the joined players when the level starts (party mode spawns them itself).
 @export var auto_spawn: bool = true
 
@@ -63,7 +67,7 @@ func spawn(slot: int, pos: Vector2, show_tag: bool, deferred := false) -> Charac
 
 
 func _physics_process(_delta: float) -> void:
-	if Engine.is_editor_hint() or not allow_drop_in:
+	if Engine.is_editor_hint() or not allow_drop_in or not keyboard_drop_in:
 		return
 	if NetCheck.online(self):
 		return  # online: people join from the lobby

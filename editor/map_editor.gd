@@ -119,91 +119,157 @@ func _build_ui() -> void:
 	_canvas.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_root.add_child(_canvas)
 
+	# Top bar: the map (name, weather) on the left, files on the right.
 	var bar := PanelContainer.new()
 	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	_root.add_child(bar)
-	var row := HFlowContainer.new()  # wraps on small windows
-	row.add_theme_constant_override("h_separation", 6)
-	row.add_theme_constant_override("v_separation", 6)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
 	bar.add_child(row)
-	for t in TOOLS:
-		var key: String = OS.get_keycode_string(TOOL_KEYS.find_key(t))
-		var b := _button(row, "%s %s" % [key, TOOL_NAMES[t]], func(): _select_tool(t))
-		b.toggle_mode = true
-		_tool_buttons[t] = b
-	row.add_child(VSeparator.new())
-	_grid_button = _check(row, "Grid", grid_on, func(on): grid_on = on; _refresh())
-	_grid_size = OptionButton.new()
-	_grid_size.focus_mode = Control.FOCUS_NONE
-	for g in GRIDS:
-		_grid_size.add_item(str(g))
-	_grid_size.select(GRIDS.find(grid))
-	_grid_size.item_selected.connect(func(i): grid = GRIDS[i]; _refresh())
-	row.add_child(_grid_size)
-	_obj_button = _check(row, "Snap to objects", snap_objects, func(on): snap_objects = on; _refresh())
+	var title := _small_title("Map editor")
+	title.add_theme_font_size_override("font_size", 24)
+	row.add_child(title)
 	row.add_child(VSeparator.new())
 	_name = LineEdit.new()
-	_name.custom_minimum_size = Vector2(180, 0)
+	_name.custom_minimum_size = Vector2(200, 0)
 	_name.placeholder_text = "Map name"
 	_name.text_submitted.connect(func(_t): _name.release_focus())
 	_name.focus_exited.connect(func(): set_map_name(_name.text))
 	row.add_child(_name)
 	_wind = _check(row, "Wind", false, func(on): _change(func(): map.wind = on))
 	_meteors = _check(row, "Meteors", false, func(on): _change(func(): map.meteors = on))
-	row.add_child(VSeparator.new())
-	for spec in [["New", _new_map], ["Load", _open_loader], ["Save", _save], ["Test", _test], ["Exit", _exit]]:
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+	for spec in [["New", _new_map], ["Load", _open_loader], ["Save", _save], ["Test (F5)", _test], ["Exit", _exit]]:
 		_button(row, spec[0], spec[1])
 
-	# Explorer: the objects in the map, and shapes to drag in.
+	# Left: tools, then snapping.
+	var left := PanelContainer.new()
+	left.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	left.offset_top = 64
+	left.offset_right = 178
+	left.offset_bottom = -44
+	_root.add_child(left)
+	var tools := VBoxContainer.new()
+	tools.add_theme_constant_override("separation", 6)
+	left.add_child(tools)
+	tools.add_child(_small_title("Tools"))
+	for t in TOOLS:
+		var key: String = OS.get_keycode_string(TOOL_KEYS.find_key(t))
+		var b := _button(tools, "%s  %s" % [TOOL_NAMES[t], key], func(): _select_tool(t))
+		b.toggle_mode = true
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		_tool_buttons[t] = b
+	tools.add_child(HSeparator.new())
+	tools.add_child(_small_title("Snap"))
+	_grid_button = _check(tools, "Grid  G", grid_on, func(on): grid_on = on; _refresh())
+	_grid_size = OptionButton.new()
+	_grid_size.focus_mode = Control.FOCUS_NONE
+	for g in GRIDS:
+		_grid_size.add_item("%d px" % g)
+	_grid_size.select(GRIDS.find(grid))
+	_grid_size.item_selected.connect(func(i): grid = GRIDS[i]; _refresh())
+	tools.add_child(_grid_size)
+	_obj_button = _check(tools, "Objects  O", snap_objects, func(on): snap_objects = on; _refresh())
+
+	# Right: tabs with the objects in the map, shapes and items to drag in.
 	var side := PanelContainer.new()
 	side.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
-	side.offset_left = -250
-	side.offset_top = 100
-	side.offset_bottom = -48
+	side.offset_left = -260
+	side.offset_top = 64
+	side.offset_bottom = -44
 	_root.add_child(side)
+	var tabs := TabContainer.new()
+	tabs.add_theme_font_size_override("font_size", 17)
+	side.add_child(tabs)
+
 	var col := VBoxContainer.new()
-	side.add_child(col)
-	col.add_child(_small_title("Objects"))
+	col.name = "Objects"
+	tabs.add_child(col)
 	_list = ItemList.new()
 	_list.select_mode = ItemList.SELECT_MULTI
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_list.focus_mode = Control.FOCUS_NONE
 	_list.add_theme_color_override("font_color", UiTheme.INK)
 	_list.add_theme_color_override("font_selected_color", UiTheme.INK)
+	var list_bg := StyleBoxFlat.new()
+	list_bg.bg_color = Color("dcd8e0")
+	list_bg.border_color = UiTheme.INK
+	list_bg.set_border_width_all(2)
+	list_bg.set_content_margin_all(4)
+	_list.add_theme_stylebox_override("panel", list_bg)
+	var sel := StyleBoxFlat.new()
+	sel.bg_color = UiTheme.LIME
+	_list.add_theme_stylebox_override("selected", sel)
+	_list.add_theme_stylebox_override("selected_focus", sel)
 	_list.multi_selected.connect(func(_i, _on): _list_to_selection())
 	_list.item_activated.connect(func(i): _focus_on(_list.get_item_metadata(i)))
 	col.add_child(_list)
-	var actions := HBoxContainer.new()
+	var actions := GridContainer.new()
+	actions.columns = 3
 	col.add_child(actions)
-	for spec in [["Copy", _duplicate], ["Delete", _delete], ["Up", func(): _reorder(1)], ["Down", func(): _reorder(-1)]]:
+	for spec in [["Copy", _duplicate], ["Delete", _delete], ["Turn  T", func(): _turn_items()],
+			["Up", func(): _reorder(1)], ["Down", func(): _reorder(-1)], ["Flip  M", func(): _flip_items()]]:
 		var b := _button(actions, spec[0], spec[1])
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_info = Label.new()
-	_info.add_theme_font_size_override("font_size", 14)
+	_info.add_theme_font_size_override("font_size", 16)
 	_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(_info)
-	col.add_child(_small_title("Drag onto the map"))
+
+	var shapes_tab := VBoxContainer.new()
+	shapes_tab.name = "Shapes"
+	tabs.add_child(shapes_tab)
+	var hint := Label.new()
+	hint.text = "Drag onto the map"
+	hint.add_theme_color_override("font_color", UiTheme.MUTED)
+	shapes_tab.add_child(hint)
 	var shapes := GridContainer.new()
 	shapes.columns = 2
-	col.add_child(shapes)
-	for s in SHAPES:
+	shapes_tab.add_child(shapes)
+	for sh in SHAPES:
 		var b := _ShapeButton.new()
-		b.shape = s
-		b.text = s
+		b.data = {"shape": sh}
+		b.text = sh
 		b.focus_mode = Control.FOCUS_NONE
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.tooltip_text = "Drag me onto the map"
 		shapes.add_child(b)
 
+	var items_tab := ScrollContainer.new()
+	items_tab.name = "Items"
+	items_tab.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	tabs.add_child(items_tab)
+	var items := GridContainer.new()
+	items.columns = 2
+	items.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	items_tab.add_child(items)
+	for id in Party.ITEMS:
+		if Party.ITEMS[id].get("bomb", false):
+			continue
+		var b := _ShapeButton.new()
+		b.data = {"item": id}
+		b.text = Party.ITEMS[id].name
+		b.icon = Party.icon(id)
+		b.expand_icon = true
+		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		b.custom_minimum_size = Vector2(110, 84)
+		b.add_theme_font_size_override("font_size", 14)
+		b.focus_mode = Control.FOCUS_NONE
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.tooltip_text = "Drag onto the map: it's there from the start of every party on this map"
+		items.add_child(b)
+
+	# Bottom: what to do, and problems.
+	var foot := PanelContainer.new()
+	foot.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	foot.offset_top = -40
+	_root.add_child(foot)
 	_status = Label.new()
-	_status.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_status.offset_left = 16
-	_status.offset_top = -40
-	_status.add_theme_font_size_override("font_size", 19)
-	_status.add_theme_color_override("font_outline_color", UiTheme.MARBLE)
-	_status.add_theme_constant_override("outline_size", 6)
-	_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_root.add_child(_status)
+	_status.add_theme_font_size_override("font_size", 17)
+	_status.clip_text = true
+	foot.add_child(_status)
 	_select_tool("select")
 
 
@@ -280,7 +346,7 @@ func _refresh(extra := "") -> void:
 func _status_text(extra := "") -> void:
 	var p := ArenaMap.problem(map)
 	var hint: String = {
-		"select": "Click to select, drag to move, drag on empty space to select several",
+		"select": "Click to select, drag to move, drag on empty space to select several. Items: T turns, M flips",
 		"ground": "Click to add points; click the first point (or Enter) to finish; Backspace: undo a point",
 		"box": "Drag to draw a box of ground",
 		"plank": "Drag sideways for a one-way plank",
@@ -303,6 +369,8 @@ func _object_ids() -> Array[String]:
 		out.append("g%d" % i)
 	for i in map.planks.size():
 		out.append("p%d" % i)
+	for i in map.items.size():
+		out.append("i%d" % i)
 	return out
 
 
@@ -315,6 +383,8 @@ func _object_name(id: String) -> String:
 	var i := int(id.substr(1))
 	if id[0] == "g":
 		return "Ground %d  (%d points)" % [i + 1, map.ground[i].size()]
+	if id[0] == "i":
+		return "%s  (item)" % Party.ITEMS.get(map.items[i].id, {}).get("name", map.items[i].id)
 	return "Plank %d  (%d wide)" % [i + 1, map.planks[i][2]]
 
 
@@ -418,19 +488,14 @@ func _delete() -> void:
 
 
 func _remove_objects(ids: Array) -> void:
-	var gs := []
-	var ps := []
-	for id in ids:
-		if id[0] == "g":
-			gs.append(int(id.substr(1)))
-		elif id[0] == "p":
-			ps.append(int(id.substr(1)))
-	gs.sort()
-	ps.sort()
-	for k in range(gs.size() - 1, -1, -1):
-		map.ground.remove_at(gs[k])
-	for k in range(ps.size() - 1, -1, -1):
-		map.planks.remove_at(ps[k])
+	for kind in [["g", "ground"], ["p", "planks"], ["i", "items"]]:
+		var idx := []
+		for id in ids:
+			if id[0] == kind[0]:
+				idx.append(int(id.substr(1)))
+		idx.sort()
+		for k in range(idx.size() - 1, -1, -1):
+			map[kind[1]].remove_at(idx[k])
 
 
 func _delete_points() -> void:
@@ -453,7 +518,7 @@ func _delete_points() -> void:
 
 
 func _duplicate() -> void:
-	var ids := selection.filter(func(id): return id[0] == "g" or id[0] == "p")
+	var ids := selection.filter(func(id): return id[0] in ["g", "p", "i"])
 	if ids.is_empty():
 		return
 	_change(func():
@@ -464,6 +529,12 @@ func _duplicate() -> void:
 			if id[0] == "g":
 				map.ground.append(map.ground[i].map(func(p): return [p[0] + off, p[1] + off]))
 				new_sel.append("g%d" % (map.ground.size() - 1))
+			elif id[0] == "i":
+				var it: Dictionary = map.items[i].duplicate()
+				it.x += off
+				it.y += off
+				map.items.append(it)
+				new_sel.append("i%d" % (map.items.size() - 1))
 			else:
 				var pl: Array = map.planks[i]
 				map.planks.append([pl[0] + off, pl[1] + off, pl[2]])
@@ -506,6 +577,8 @@ func _bounds(id: String, m := {}) -> Rect2:
 	var i := int(id.substr(1))
 	if id[0] == "g":
 		return ArenaMap.poly_rect(m.ground[i])
+	if id[0] == "i":
+		return ArenaMap.item_rect(m.items[i])
 	return ArenaMap.plank_rect(m.planks[i])
 
 
@@ -523,6 +596,9 @@ func _selection_bounds() -> Rect2:
 func hit(p: Vector2) -> String:
 	if Rect2(map.goal[0] - 40, map.goal[1] - 160, 80, 160).has_point(p):
 		return "flag"
+	for i in range(map.items.size() - 1, -1, -1):
+		if ArenaMap.item_rect(map.items[i]).has_point(p):
+			return "i%d" % i
 	for i in range(map.planks.size() - 1, -1, -1):
 		if ArenaMap.plank_rect(map.planks[i]).grow(6).has_point(p):
 			return "p%d" % i
@@ -794,6 +870,9 @@ func _move_object(id: String, d: Vector2) -> void:
 			var i := int(id.substr(1))
 			if id[0] == "g":
 				map.ground[i] = map.ground[i].map(func(p): return [int(p[0] + d.x), int(p[1] + d.y)])
+			elif id[0] == "i":
+				map.items[i].x = int(map.items[i].x + d.x)
+				map.items[i].y = int(map.items[i].y + d.y)
 			else:
 				var pl: Array = map.planks[i]
 				map.planks[i] = [int(pl[0] + d.x), int(pl[1] + d.y), pl[2]]
@@ -817,6 +896,10 @@ func _scale_object(id: String, anchor: Vector2, k: Vector2) -> void:
 	elif id == "flag":
 		var q: Vector2 = f.call(Vector2(map.goal[0], map.goal[1]))
 		map.goal = [int(q.x), int(q.y)]
+	elif id[0] == "i":
+		var q: Vector2 = f.call(Vector2(map.items[int(id.substr(1))].x, map.items[int(id.substr(1))].y))
+		map.items[int(id.substr(1))].x = int(q.x)
+		map.items[int(id.substr(1))].y = int(q.y)
 	elif id[0] == "p":
 		var i := int(id.substr(1))
 		var a: Vector2 = f.call(Vector2(map.planks[i][0], map.planks[i][1]))
@@ -922,6 +1005,32 @@ func drop_shape(shape: String, w: Vector2) -> void:
 	_select_tool("select")
 
 
+## An item from the Items tab was dropped on the map.
+func drop_item(id: String, w: Vector2) -> void:
+	var at := snap(w)
+	_change(func():
+		map.items.append({"id": id, "x": int(at.x), "y": int(at.y), "rot": 0, "mirror": false})
+		selection.assign(["i%d" % (map.items.size() - 1)]))
+	points_sel.clear()
+	_select_tool("select")
+
+
+func _turn_items() -> void:
+	var ids := selection.filter(func(id): return id[0] == "i")
+	if not ids.is_empty():
+		_change(func():
+			for id in ids:
+				map.items[int(id.substr(1))].rot = (map.items[int(id.substr(1))].rot + 1) % 4)
+
+
+func _flip_items() -> void:
+	var ids := selection.filter(func(id): return id[0] == "i")
+	if not ids.is_empty():
+		_change(func():
+			for id in ids:
+				map.items[int(id.substr(1))].mirror = not map.items[int(id.substr(1))].mirror)
+
+
 func zoom_at(k: float, screen: Vector2) -> void:
 	var before := to_world(screen)
 	_cam.zoom = (_cam.zoom * k).clamp(Vector2(0.12, 0.12), Vector2(3, 3))
@@ -965,6 +1074,10 @@ func key(k: Key, ctrl := false, shift := false) -> bool:
 		_finish_polygon()
 	elif not ctrl and TOOL_KEYS.has(k):
 		_select_tool(TOOL_KEYS[k])
+	elif k == KEY_T and not ctrl:
+		_turn_items()
+	elif k == KEY_M and not ctrl:
+		_flip_items()
 	elif k == KEY_G:
 		grid_on = not grid_on
 		_grid_button.set_pressed_no_signal(grid_on)
@@ -1146,6 +1259,18 @@ func _draw() -> void:
 			var c := Vector2(p[0] + 24 + k * 48, p[1] + 12)
 			draw_line(c + Vector2(-6, 4), c + Vector2(0, -4), GREEN, 3.0)
 			draw_line(c + Vector2(6, 4), c + Vector2(0, -4), GREEN, 3.0)
+	# Items that come with the map.
+	for it in map.items:
+		var r := ArenaMap.item_rect(it)
+		var tex := Party.icon(it.id) if Party.ITEMS.has(it.id) else null
+		draw_rect(r, Color(1, 1, 1, 0.25))
+		if tex:
+			var side := minf(minf(r.size.x, r.size.y), 96.0)
+			var c := Vector2(it.x, it.y)
+			draw_set_transform(c, it.rot * PI / 2.0, Vector2(-1 if it.mirror else 1, 1))
+			draw_texture_rect(tex, Rect2(Vector2(-side, -side) / 2.0, Vector2(side, side)), false)
+			draw_set_transform(Vector2.ZERO)
+		draw_rect(r, Color(INK, 0.6), false, 2.0 * px)
 	# Flag and its no-build zone.
 	draw_rect(ArenaMap.goal_zone(map), Color(RED, 0.5), false, 2.0 * px)
 	draw_texture_rect(FLAG, Rect2(Vector2(map.goal[0] - 40, map.goal[1] - 160), Vector2(80, 160)), false)
@@ -1251,19 +1376,22 @@ class _Canvas extends Control:
 			accept_event()
 
 	func _can_drop_data(_pos: Vector2, data) -> bool:
-		return data is Dictionary and data.has("shape")
+		return data is Dictionary and (data.has("shape") or data.has("item"))
 
 	func _drop_data(pos: Vector2, data) -> void:
-		editor.drop_shape(data.shape, editor.to_world(pos))
+		if data.has("item"):
+			editor.drop_item(data.item, editor.to_world(pos))
+		else:
+			editor.drop_shape(data.shape, editor.to_world(pos))
 
 
 ## A palette button you drag onto the map.
 class _ShapeButton extends Button:
-	var shape := ""
+	var data := {}
 
 	func _get_drag_data(_pos: Vector2):
 		var l := Label.new()
-		l.text = shape
+		l.text = text
 		l.add_theme_font_size_override("font_size", 20)
 		set_drag_preview(l)
-		return {"shape": shape}
+		return data

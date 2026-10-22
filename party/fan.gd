@@ -15,7 +15,9 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	var dir := Vector2.UP.rotated(global_rotation)
+	# The fan's own "up", even when it's flipped (a flip shows up as a negative
+	# scale, which can turn global_rotation half a turn).
+	var dir := -global_transform.y.normalized()
 	for b in _column.get_overlapping_bodies():
 		if b is CharacterBody2D:
 			var along: float = b.velocity.dot(dir)

@@ -1,15 +1,22 @@
-Collision between player sin party mode (should be disabled)
-Arrows shouldn't pass though certain materials (add a fence material atround spawn which kills arrows)
-Show what the path of circular saws will be 
-Show the path of arrows of a thing
-Show the zone of action of the bomb
-Add a big bomb with double radius (nuke) which is very rare 
-Add an outline of non oncstruction when things are trying to be placed within.
-Fix the collisions (implement double collision for physics and damage)
-Fix the campaign : there should be campaign sets based on the amount of players.
-Add a configuration for party mode where you can disable / change %s for items.
-Add more stuff (ferris wheel etc)
-Bigger maps 
-Maps with effects like wind or meteors etc.
-Look for errors / bug / performance issues.
-
+Done in v0.26:
+- [x] Fix : pressing action in campaign adds players (no more drop-in with the keyboard; join from Players)
+- [x] Fix : bots should be setup in player tab (Players: left / right how many, up / down how good)
+- [x] Fix : let place stuff even outside place mode with place instead of give (console "place", any phase)
+- [x] Fix : make console a bit smaller
+- [x] Feature : add party settings (Party > Rules: mode, first to, round time, coins, surprises, equal odds)
+- [x] Maps : load from tscn too (editor/arena_template.tscn in a maps folder), and maps can hold party items
+- [x] Feature : be able to change your port for hosting (Online > Port)
+- [x] Feature : hosting from commandline (-- --help)
+- [x] Feature : save states in commandline (console savestate / loadstate / states, or -- --state=NAME)
+- [x] Fix : bumper doesn't look right during placement
+- [x] Fix : the map editor window should be nicer
+- [x] Feature : add a simple gamemode mod that adds a new gamemode (example mod: Sudden death)
+- [x] Feature : add an ingame editor for node properties etc (console "inspect")
+- [x] Fix : mines and items are invisible during placement if used
+- [x] Fix : plane launcher should be a travel method not a offensive thing (planes are rides)
+- [x] Fix : wind direction is wrong (the sign was off screen; now centred with arrows)
+- [x] Fix : distant players: bubble at the screen edge with an arrow and a small live view (Settings > Distant players)
+- [x] Fix : next command in party mode should skip to next round
+- [x] Fix : flipped fans pulled players in while the air went up
+- [x] Settings > Controls: change each player's keys (keys dropping out on a shared keyboard)
+- [x] Bots: see fans, trampolines, conveyors, moving planes, crumbling blocks, saws on their tracks; more jumps to try
