@@ -8,6 +8,7 @@ var _armed := true
 var _blink := 0.0
 @onready var _trigger: Hazard = $Trigger
 @onready var _sprite: Sprite2D = $Sprite2D
+@onready var _solid: CollisionShape2D = $CollisionShape2D
 
 
 func _ready() -> void:
@@ -56,6 +57,7 @@ func _on_touch(body: Node) -> void:
 
 func _boom() -> void:
 	_sprite.hide()
+	_solid.set_deferred("disabled", true)  # gone: nothing left to bump into
 	_trigger.set_deferred("monitoring", false)
 	var level := get_tree().current_scene if get_tree().current_scene else get_parent()
 	level.add_child(Effects.ring(global_position, radius, Color(1, 0.55, 0.2)))
@@ -64,4 +66,5 @@ func _boom() -> void:
 func reset_round() -> void:
 	_armed = true
 	_sprite.show()
+	_solid.set_deferred("disabled", false)
 	_trigger.set_deferred("monitoring", true)
