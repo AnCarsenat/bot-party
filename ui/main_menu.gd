@@ -37,6 +37,8 @@ var _lobby: _Lobby
 var _footer: HBoxContainer
 var _hint: Label
 var _nav_cooldown := 0.0
+var _preview: Control  # Settings: live bubble preview (DistantPlayers.Preview)
+const PREVIEW_KEYS := ["distant_players", "bubble_view", "bubble_size"]
 
 
 func _ready() -> void:
@@ -292,6 +294,8 @@ func _show(screen: String, keep_index := false) -> void:
 					"info": "A robot off the screen gets a bubble at the edge with a small view of it."},
 				{"text": "Bubble view", "key": "bubble_view", "on_left": func(): _bump("bubble_view", -0.1), "on_right": func(): _bump("bubble_view", 0.1), "on_accept": func(): _bump("bubble_view", 0.1, true),
 					"info": "How much of the level a distant player's bubble shows. More bars: zoomed further out."},
+				{"text": "Bubble size", "key": "bubble_size", "on_left": func(): _bump("bubble_size", -0.1), "on_right": func(): _bump("bubble_size", 0.1), "on_accept": func(): _bump("bubble_size", 0.1, true),
+					"info": "How big a distant player's bubble is on the screen."},
 				{"text": "Controls", "on_accept": func(): _show("controls"), "info": "Change the keys of each player."},
 				{"text": "Mods", "on_accept": func(): _show("mods"), "info": "Items, maps and textures made by players.",
 					"enabled": not Net.is_online()},
@@ -378,6 +382,29 @@ func _refresh_info() -> void:
 	for k in _rows.size():
 		var shown := k >= first and k < first + ROWS_VISIBLE
 		_rows[k].modulate.a = 1.0 if shown else 0.0
+	_refresh_preview()
+
+
+## Settings: while a bubble setting is selected, a live bubble replaces the
+## machine picture, so the change can be seen as it's made.
+func _refresh_preview() -> void:
+	var key: String = _items[_index].get("key", "") if not _items.is_empty() else ""
+	var want: bool = _screen == "settings" and key in PREVIEW_KEYS and GameState.settings.get("distant_players", true)
+	if want and _preview == null:
+		_preview = DistantPlayers.Preview.new()
+		_preview.anchor_left = 1.0
+		_preview.anchor_right = 1.0
+		_preview.offset_left = -560
+		_preview.offset_right = -60
+		_preview.offset_top = 140
+		_preview.offset_bottom = 400
+		add_child(_preview)
+	elif not want and _preview != null:
+		_preview.queue_free()
+		_preview = null
+	if not _lobby.visible:
+		_machine.visible = not want
+	_info.offset_top = 420 if want else 330
 
 
 ## Party > Items row value: chance in % (or Off) plus a bar for the weight.
@@ -498,6 +525,8 @@ func cable_target() -> Vector2:
 
 
 func cable_start() -> Vector2:
+	if _preview != null:  # the cable runs from the bubble preview instead
+		return _preview.cable_point() - global_position
 	if not _machine.visible:
 		return Vector2.INF
 	return _machine.global_position - global_position + Vector2(10, 100)

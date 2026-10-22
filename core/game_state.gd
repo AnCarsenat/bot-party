@@ -82,7 +82,7 @@ func leave(slot: int) -> void:
 		save_settings()
 var current_level: int = -1
 ## Player-facing options, saved with the progress.
-var settings := {"music_volume": 0.8, "sfx_volume": 0.8, "fullscreen": false, "distant_players": true, "bubble_view": 0.8}
+var settings := {"music_volume": 0.8, "sfx_volume": 0.8, "fullscreen": false, "distant_players": true, "bubble_view": 0.8, "bubble_size": 0.4}
 ## Campaign id -> how many of its levels can be picked in the menu (1 = only the first).
 var _unlocked := {}
 var unlocked: int:
