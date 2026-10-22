@@ -122,7 +122,7 @@ static func controls_text(n: int) -> String:
 	if parts.is_empty():
 		return "-"
 	if parts[0].begins_with("Pad"):
-		return parts[0] + " stick, A to jump"
+		return parts[0] + " stick or D-pad, A to jump"
 	return "%s %s to move, %s to jump" % parts
 
 

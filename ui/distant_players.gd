@@ -64,7 +64,7 @@ class _Bubble extends Control:
 		_view.canvas_item_default_texture_filter = Viewport.DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST
 		box.add_child(_view)
 		_cam = Camera2D.new()
-		_cam.zoom = Vector2(0.6, 0.6)
+		_cam.zoom = Vector2(0.35, 0.35)
 		_view.add_child(_cam)
 		_cam.make_current()
 
