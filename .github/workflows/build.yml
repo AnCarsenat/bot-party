@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GODOT_VERSION: "4.7"
+  GODOT_VERSION: "4.7.2"   # same as the editor you use
   GODOT_STATUS: "stable"
 
 jobs:
@@ -79,6 +79,7 @@ jobs:
           ~/godot/godot --headless --path . --export-release "Windows" export/windows/BotParty.exe
           ~/godot/godot --headless --path . --export-release "macOS" export/macos/BotParty.zip
           N="${{ steps.ver.outputs.name }}"
+          cp player/icon.png export/linux/BotParty.png   # for the menu entry (install.sh)
           (cd export/linux && chmod +x BotParty.x86_64 && zip -q -r "../../dist/BotParty-$N-linux.zip" .)
           (cd export/windows && zip -q -r "../../dist/BotParty-$N-windows.zip" .)
           cp export/macos/BotParty.zip "dist/BotParty-$N-macos.zip"

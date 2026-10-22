@@ -10,3 +10,5 @@ __*.gd.uid
 __pycache__/
 # Editor backups (e.g. sprite.webp~)
 *~
+# Archives dropped in the project folder (builds, uploads)
+/*.zip

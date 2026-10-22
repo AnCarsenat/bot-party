@@ -1,7 +1,7 @@
 # Builds
 
 GitHub Actions (`.github/workflows/build.yml`) builds the game for Linux,
-Windows and macOS with Godot 4.7, using `export_presets.cfg`.
+Windows and macOS with Godot 4.7.2 (set in the workflow), using `export_presets.cfg`.
 
 - **Every push to `main`** replaces the **nightly** pre-release
   (repository → Releases → "Nightly"). Each run also keeps its zips for 14 days
@@ -12,6 +12,10 @@ Windows and macOS with Godot 4.7, using `export_presets.cfg`.
   git tag v0.27
   git push origin v0.27
   ```
+
+Players install and update with `install.sh` (Linux, macOS) or `install.ps1`
+(Windows): they download the latest release, or the nightly with `--nightly` /
+`-Nightly`. See the README.
 
 The menu shows the build name in the bottom-right corner (`v0.27`, or
 `nightly-20261022-1a2b3c4`).
