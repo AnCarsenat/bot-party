@@ -42,6 +42,32 @@ func _enter_tree() -> void:
 	$Weather.wind = m.wind
 	$Weather.meteors = m.meteors
 	set_meta("title", m.name)
+	_add_scene_nodes(level, str(m.get("scene", "")))
+
+
+## A map made in Godot can have nodes of its own (see ArenaMap.load_scene): they
+## join the arena, on every computer of an online game (each runs its own copy).
+func _add_scene_nodes(level: Node, path: String) -> void:
+	if path == "" or not ResourceLoader.exists(path):
+		return
+	var packed = load(path)
+	if not packed is PackedScene:
+		return
+	var root: Node = packed.instantiate()
+	var extras := Node2D.new()
+	extras.name = "MapScene"
+	for c in ArenaMap.extra_nodes(root):
+		root.remove_child(c)
+		_clear_owner(c)
+		extras.add_child(c)
+	root.free()
+	level.add_child(extras)
+
+
+func _clear_owner(n: Node) -> void:
+	n.owner = null
+	for c in n.get_children():
+		_clear_owner(c)
 
 
 func _ground(parent: Node, n: String, pts: PackedVector2Array) -> void:

@@ -83,8 +83,10 @@ jobs:
           (cd export/linux && chmod +x BotParty.x86_64 && zip -q -r "../../dist/BotParty-$N-linux.zip" .)
           (cd export/windows && zip -q -r "../../dist/BotParty-$N-windows.zip" .)
           cp export/macos/BotParty.zip "dist/BotParty-$N-macos.zip"
+          # The example mod, as a mod pack (goes in the game's mods folder).
+          ~/godot/godot --headless --path . --script res://editor/pack_mod.gd -- res://mods/example dist/example.pck
           ls -la dist
-          test -s "dist/BotParty-$N-linux.zip" && test -s "dist/BotParty-$N-windows.zip" && test -s "dist/BotParty-$N-macos.zip"
+          test -s "dist/BotParty-$N-linux.zip" && test -s "dist/BotParty-$N-windows.zip" && test -s "dist/BotParty-$N-macos.zip" && test -s dist/example.pck
 
       - name: Keep the builds (Actions > this run > Artifacts)
         uses: actions/upload-artifact@v4

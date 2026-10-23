@@ -123,9 +123,11 @@ bot-party -- --help
   the map straight from the editor. Saved maps appear in **Party → Arena**.
 - **In Godot:** open `editor/arena_template.tscn` and edit it with Godot's own
   tools. Press **Save map**, or press F6 to play it.
-- **Mods** add items, maps, textures and game modes. Each is a folder with a
-  `mod.json`, switched on and off in **Settings → Mods**. See
-  [MODDING.md](MODDING.md) and the example in `mods/example`.
+- **Mods** add items, maps, textures and game modes. Make them in Godot with
+  `editor/mod_kit.tscn`: your scenes and scripts become a mod pack (`.pck`) that
+  players drop in their mods folder and switch on in **Settings → Mods**. Map
+  scenes in a pack can hold any Godot nodes. See [MODDING.md](MODDING.md) and the
+  example in `mods/example` (its pack is on the Releases page).
 
 ![Map editor](docs/screenshots/editor.png)
 
@@ -142,9 +144,9 @@ bot-party -- --help
 | `objects/`, `logic/` | campaign machines: buttons, doors, lifts, logic gates |
 | `levels/` | campaign levels |
 | `party/` | party mode: rounds, items, arenas, bots, map format, game modes |
-| `editor/` | map editor and the Godot map template |
+| `editor/` | map editor, the Godot map template, the mod kit |
 | `net/` | online play (host-authoritative, with a relay) |
-| `mods/` | mod loader and the example mod |
+| `mods/` | mod loader, and mods being made (the example) |
 | `ui/` | menus, console, inspector, fonts |
 | `server/` | server list and relay (Python), VPS deploy scripts |
 

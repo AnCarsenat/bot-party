@@ -21,6 +21,10 @@ const DIR := "user://maps"
 const SCENE := "res://party/custom_arena.tscn"
 
 
+## The parts of a map scene (editor/arena_template.tscn) that make up the map.
+const SCENE_PARTS := ["Ground", "Planks", "Start", "Flag", "Items"]
+
+
 static func blank(name := "New map") -> Dictionary:
 	return {
 		"format": FORMAT, "name": name, "author": "",
@@ -72,7 +76,10 @@ static func load_file(path: String) -> Dictionary:
 	return normalize(data) if data is Dictionary else {}
 
 
-## A map made in Godot (a scene whose root is an ArenaSource).
+## A map made in Godot (a scene whose root is an ArenaSource). When the scene is
+## part of the game or of a mod pack (res://) and has nodes of its own next to
+## Ground, Planks, Start, Flag and Items, the map keeps the scene's path ("scene"),
+## and the arena adds those nodes when it's played.
 static func load_scene(path: String) -> Dictionary:
 	if not ResourceLoader.exists(path):
 		return {}
@@ -81,8 +88,16 @@ static func load_scene(path: String) -> Dictionary:
 		return {}
 	var root = packed.instantiate()
 	var m: Dictionary = root.to_map() if root.has_method("to_map") else {}
+	if not m.is_empty() and path.begins_with("res://") and not extra_nodes(root).is_empty():
+		m.scene = path
 	root.free()
 	return m
+
+
+## The nodes of a map scene that aren't part of the map format (decorations,
+## moving things, anything made in Godot).
+static func extra_nodes(root: Node) -> Array:
+	return root.get_children().filter(func(c): return not str(c.name) in SCENE_PARTS)
 
 
 ## Every map file: your own (user://maps) and the ones from mods. [{name, path, mod}]
@@ -93,7 +108,8 @@ static func list_all() -> Array:
 		if not DirAccess.dir_exists_absolute(dir):
 			continue
 		for f in DirAccess.get_files_at(dir):
-			if f.ends_with(".json") or f.ends_with(".tscn"):
+			f = f.trim_suffix(".remap")  # a scene in a pack exported by Godot
+			if f.ends_with(".json") or f.ends_with(".tscn") or f.ends_with(".scn"):
 				var m := load_file(dir.path_join(f))
 				if not m.is_empty():
 					out.append({"name": m.name, "path": dir.path_join(f), "mod": dir != DIR})
@@ -111,6 +127,8 @@ static func normalize(data: Dictionary) -> Dictionary:
 		for b in data.blocks:
 			if b is Array and b.size() >= 4:
 				m.ground.append(_box(b[0], b[1], b[2], b[3]))
+	if data.get("scene") is String and str(data.scene).begins_with("res://"):
+		m.scene = data.scene
 	m.format = FORMAT
 	m.name = str(m.name).left(40)
 	m.author = str(m.author).left(40)

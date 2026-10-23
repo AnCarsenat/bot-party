@@ -324,7 +324,7 @@ func _show(screen: String, keep_index := false) -> void:
 					"on_accept": func(): _toggle_mod(mod), "on_left": func(): _toggle_mod(mod), "on_right": func(): _toggle_mod(mod),
 					"info": _mod_info(mod)})
 			_items.append({"text": "Open mods folder", "on_accept": func(): Mods.open_folder(),
-				"info": "Put each mod in its own folder here:\n%s\nThen come back to this screen." % ProjectSettings.globalize_path(Mods.DIR)})
+				"info": "Put mod packs (.pck) or mod folders here:\n%s\nThen come back to this screen." % ProjectSettings.globalize_path(Mods.DIR)})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 	_heading.text = {"main": "", "campaign": _campaign_heading(), "party": "Party", "party_items": "Party items", "party_rules": "Party rules", "players": "Players",
 		"settings": "Settings", "controls": "Controls", "mods": "Mods", "online": "Online", "servers": "Server list", "online_lobby": _online_heading()}[screen]
@@ -554,7 +554,11 @@ func _toggle(key: String) -> void:
 # --- Input --------------------------------------------------------------------
 
 func _toggle_mod(mod: Dictionary) -> void:
+	var count: int = Mods.mods.size()
 	Mods.set_enabled(mod.id, not mod.enabled)
+	if Mods.get_mod(mod.id) != mod or Mods.mods.size() != count:
+		_show("mods", true)  # a mod pack was loaded: the list was read again
+		return
 	_items[_index].info = _mod_info(mod)
 	_refresh_info()
 
@@ -563,7 +567,8 @@ func _mod_info(mod: Dictionary) -> String:
 	var lines := []
 	if mod.description != "":
 		lines.append(mod.description.left(120))
-	lines.append("v%s%s" % [mod.version, (" by " + mod.author) if mod.author != "" else ""])
+	var kind: String = {"pack": "Mod pack", "project": "In the game project"}.get(mod.get("kind", ""), "Folder")
+	lines.append("v%s%s  (%s)" % [mod.version, (" by " + mod.author) if mod.author != "" else "", kind])
 	var adds := []
 	if not mod.items.is_empty():
 		adds.append("%d item%s" % [mod.items.size(), "s" if mod.items.size() > 1 else ""])

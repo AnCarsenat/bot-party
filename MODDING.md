@@ -1,17 +1,25 @@
 # Making mods for Bot Party
 
-A mod is a folder with a `mod.json` file. Put it in the game's mods folder and it
-shows up in **Settings > Mods**, where each mod can be switched on and off.
-
 A mod can:
 
-- **add party items**: built-in item scenes with new settings, a script, or both;
-- **add maps** for party mode (made with the map editor);
+- **add party items**: new scenes and scripts, or the game's item scenes with new settings;
+- **add maps** for party mode, made in the game's map editor or as Godot scenes;
+- **add game modes**;
 - **replace textures** (any sprite in the game).
 
-A complete example lives in [`mods/example/`](mods/example). It adds a pinball
-bumper, a long plank, a mint coin and a map. Copy that folder into your mods
-folder to try it, then change it.
+Mods are switched on and off in **Settings > Mods**. There are two kinds:
+
+- **Mod packs** (`.pck` files), made in Godot. Everything in them works like the
+  game's own files: scenes, scripts, pictures, sounds, map scenes with any nodes
+  you like. This is the way to go.
+- **Mod folders**: a folder with a `mod.json` and plain files (png pictures,
+  `.gd` scripts, map files). No Godot needed, but pictures have to be loaded from
+  scripts, and map scenes can't have nodes of their own.
+
+Both use the same `mod.json`. A complete example is in
+[`mods/example/`](mods/example): a pinball bumper, a long plank, a mint coin, a
+game mode, a map file and a map scene with a windmill. Its pack, `example.pck`,
+is on the [Releases page](https://github.com/AnCarsenat/bot-party/releases).
 
 ## Where mods go
 
@@ -24,11 +32,10 @@ it's here:
 | Windows | `%APPDATA%\Godot\app_userdata\Bot Party\mods\` |
 | macOS   | `~/Library/Application Support/Godot/app_userdata/Bot Party/mods/` |
 
-Give each mod its own folder:
-
 ```
 mods/
-  my-mod/
+  rockets.pck          a mod pack
+  my-mod/              a mod folder
     mod.json
     rocket.png
     rocket.gd
@@ -36,9 +43,45 @@ mods/
       long-jump.json
 ```
 
-The folder name is the mod's id (lower case, `-` for spaces). Item ids get it
-as a prefix: item `rocket` in folder `my-mod` is `my-mod.rocket` (that's the name
-to use with the console: `give my-mod.rocket 1`).
+The pack's or folder's name is the mod's id (lower case). Item ids get it as a
+prefix: item `rocket` in mod `rockets` is `rockets.rocket` (that's the name to
+use with the console: `give rockets.rocket 1`). Keep a pack's file name when you
+share it.
+
+## Making a mod pack in Godot
+
+You need the game's source (`git clone https://github.com/AnCarsenat/bot-party`)
+and [Godot 4.7](https://godotengine.org/download). Open `project.godot`, then:
+
+1. **Open `editor/mod_kit.tscn`** and select the **ModKit** node. Its buttons
+   are in the inspector.
+2. Type a name in **New mod** (lower case, like `rockets`) and press **Create the
+   mod**. This makes `res://mods/rockets/` with a `mod.json` and a first map
+   scene in `maps/`, and switches the mod on.
+3. **Make your things in that folder**: scenes, scripts, pictures, sounds. Use
+   the game's scenes and scripts as you like (`res://party/items/...`). List
+   the items, modes and textures in `mod.json` (below). Paths in `mod.json` are
+   relative to the mod folder, or full `res://` paths.
+4. **Press F5** to try it. When the game runs from Godot, it uses your folder
+   directly, so changes show up the next time you run it. (Mods in the project
+   are off until you switch them on, in **Settings > Mods** or with **Switch it on
+   in the game**.)
+5. **Press Export the mod pack.** It writes `rockets.pck` into the game's mods
+   folder, where the installed game finds it. Set **Copy to** to also put it
+   somewhere to share. Give that file to other players.
+
+Everything a mod pack needs must be inside its folder (or be part of the game).
+Don't use `class_name` in mod scripts: refer to your scripts with `preload()`.
+Mods in `res://mods/` are never part of the game's own builds.
+
+From a terminal (for your own builds), after `godot --headless --import`:
+
+```sh
+godot --headless --path . --script res://editor/pack_mod.gd -- res://mods/rockets rockets.pck
+```
+
+When the game finds a pack and your project also has its folder (you're making
+that mod), the folder wins: the pack would hide your latest changes.
 
 ## mod.json
 
@@ -77,9 +120,9 @@ Every key is optional except `name`.
 | Key | What it does |
 |-----|--------------|
 | `name` | Name on the pick card and in Party > Items. |
-| `scene` | The item's scene. Use a game scene (`res://...`, list below) or a `.tscn` in your mod folder. |
-| `script` | A `.gd` file in your mod folder, added to the item (see below). |
-| `icon` | Picture on the pick card: a png in your mod folder, or a game texture (`res://...`). |
+| `scene` | The item's scene: one of yours, or a game scene (`res://...`, list below). |
+| `script` | A `.gd` file, added to the item (see below). Optional: your scene can have its own scripts. |
+| `icon` | Picture on the pick card: one of yours, or a game texture (`res://...`). |
 | `size` | `[width, height]` of the item in pixels. Used to stop building in the start and flag areas. |
 | `offset` | Where that box sits from the item's centre, `[x, y]`. |
 | `weight` | How often it shows up, 0 to 20. Built-in items use 5 to 10. Players can change it in Party > Items. |
@@ -127,7 +170,7 @@ func _ready() -> void:
 
 Things you can use:
 
-- `Mods.texture(path)`: loads a png, jpg or webp from your mod folder.
+- `Mods.texture(path)`: loads a picture from your mod (works in packs and folders).
 - Players are `CharacterBody2D` on physics layer 2 (mask `2` to detect them).
   - `player.bounce(speed, 1.0, direction)` launches a player, like a trampoline.
   - `player.velocity` is the player's velocity.
@@ -135,12 +178,9 @@ Things you can use:
   touching it takes the player out, and the item's owner gets the trap points.
 - `Party.session` holds the round, scores and placed items.
 
-Pngs can't go in a `.tscn` inside your mod (Godot only imports the game's own
-files). Load pictures with `Mods.texture()` from the script instead, like the
-bumper does.
-
-**Only install mods you trust.** Scripts can do anything a game can. Bot Party
-never downloads scripts: in online games everybody needs the mod installed.
+In a mod pack, your scenes can use your pictures like any Godot scene. In a mod
+folder they can't (Godot only imports files that are part of a project): load
+pictures with `Mods.texture()` from a script instead, like the bumper does.
 
 ### Maps
 
@@ -160,9 +200,8 @@ There are two ways to make maps:
   play it straight away. **Load the map file** brings an existing map into the
   scene.
 
-Saved maps go to `maps/` next to `mods/`. In Godot, you can also set
-`save_folder` to save straight into your mod. Copy the `.json` files into
-your mod's `maps` folder. They show up in **Party > Arena**, marked "(mod)".
+Saved maps go to `maps/` next to `mods/`. Copy the `.json` files into a mod's
+`maps` folder to share them. Mod maps show up in **Party > Arena**, marked "(mod)".
 
 A map file looks like this (format 2):
 
@@ -196,9 +235,19 @@ editor, drag them from the **Items** tab; T turns them, M flips them. In a file:
 
 ### Maps as Godot scenes
 
-A map can also be a `.tscn` made from `editor/arena_template.tscn`: put it in a
-`maps` folder (yours or a mod's) and it's listed like the `.json` ones. Party
-items go under its `Items` node as instances of the item scenes.
+A map can also be a `.tscn` made from `editor/arena_template.tscn` (the mod kit's
+**New map scene in this mod** makes one): put it in a mod's `maps` folder and
+it's listed like the `.json` ones. Party items go under its `Items` node as
+instances of the item scenes.
+
+**In a mod pack, a map scene can have nodes of its own.** Everything next to
+`Ground`, `Planks`, `Start`, `Flag` and `Items` is added to the arena when the
+map is played: decorations, pictures, particles, lights, animated things,
+scripts. The example's `windmill_hill.tscn` has a windmill whose sails turn
+(`windmill.gd`). Online, each computer runs its own copy of these nodes, so keep
+them to looks, or to motion that only depends on time, for things players touch.
+
+A mod pack can be just maps: a `maps` folder, with or without a `mod.json`.
 
 ### Game modes
 
@@ -238,10 +287,15 @@ Texture changes show up after restarting the game.
 
 ## Online
 
-To join an online game, you need every mod with **items or modes** the host has switched on,
-with the same version. Otherwise the game says which mods are missing. Maps
-travel with the game, and textures are only looks, so mods with just maps or
-textures are never needed by other players.
+To join an online game, you need every mod with **items or modes** the host has
+switched on, and every **mod pack with maps**, with the same version. Otherwise
+the game says which mods are missing. Raise `version` in `mod.json` when you
+share a new version. Map files from mod folders travel with the game, and
+textures are only looks, so mod folders with just maps or textures are never
+needed by other players.
+
+**Only install mods you trust.** Mods run their scripts like the game's own.
+Bot Party never downloads mods: in online games everybody installs them.
 
 ## When something's wrong
 

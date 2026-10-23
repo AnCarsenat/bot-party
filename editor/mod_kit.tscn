@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://editor/mod_kit.gd" id="1_kit"]
+
+[node name="ModKit" type="Node"]
+script = ExtResource("1_kit")

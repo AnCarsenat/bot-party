@@ -1,0 +1,79 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://editor/arena_source.gd" id="1_src"]
+[ext_resource type="Script" path="res://mods/example/maps/windmill.gd" id="2_mill"]
+[ext_resource type="PackedScene" path="res://objects/trampoline.tscn" id="3_tramp"]
+
+[node name="WindmillHill" type="Node2D"]
+script = ExtResource("1_src")
+map_name = "Windmill hill"
+author = "Bot Party"
+wind = true
+
+[node name="Ground" type="Node2D" parent="."]
+
+[node name="Left" type="Polygon2D" parent="Ground"]
+polygon = PackedVector2Array(-192, 576, 448, 576, 448, 672, -192, 672)
+
+[node name="Hill" type="Polygon2D" parent="Ground"]
+polygon = PackedVector2Array(640, 576, 896, 480, 1088, 448, 1280, 480, 1472, 576, 1472, 672, 640, 672)
+
+[node name="End" type="Polygon2D" parent="Ground"]
+polygon = PackedVector2Array(1728, 448, 2304, 448, 2304, 544, 1728, 544)
+
+[node name="Planks" type="Node2D" parent="."]
+
+[node name="Plank1" type="Polygon2D" parent="Planks"]
+color = Color(0.9411765, 1, 0.95686275, 1)
+polygon = PackedVector2Array(1504, 448, 1696, 448, 1696, 472, 1504, 472)
+
+[node name="Start" type="Polygon2D" parent="."]
+color = Color(0.42, 0.73, 0.49, 0.3)
+polygon = PackedVector2Array(-160, 384, 256, 384, 256, 576, -160, 576)
+
+[node name="Flag" type="Marker2D" parent="."]
+position = Vector2(2112, 448)
+
+[node name="Items" type="Node2D" parent="."]
+
+[node name="Trampoline" parent="Items" instance=ExtResource("3_tramp")]
+position = Vector2(560, 640)
+
+[node name="Windmill" type="Node2D" parent="."]
+z_index = -1
+position = Vector2(1088, 448)
+script = ExtResource("2_mill")
+
+[node name="Tower" type="Polygon2D" parent="Windmill"]
+color = Color(0.86, 0.8, 0.7, 1)
+polygon = PackedVector2Array(-50, 0, -30, -260, 30, -260, 50, 0)
+
+[node name="Door" type="Polygon2D" parent="Windmill"]
+color = Color(0.45, 0.3, 0.22, 1)
+polygon = PackedVector2Array(-14, 0, -14, -40, 14, -40, 14, 0)
+
+[node name="Sails" type="Node2D" parent="Windmill"]
+position = Vector2(0, -250)
+
+[node name="Sail1" type="Polygon2D" parent="Windmill/Sails"]
+color = Color(0.97, 0.95, 0.9, 0.9)
+polygon = PackedVector2Array(-12, -10, -12, -190, 26, -190, 26, -10)
+
+[node name="Sail2" type="Polygon2D" parent="Windmill/Sails"]
+rotation = 1.5707964
+color = Color(0.97, 0.95, 0.9, 0.9)
+polygon = PackedVector2Array(-12, -10, -12, -190, 26, -190, 26, -10)
+
+[node name="Sail3" type="Polygon2D" parent="Windmill/Sails"]
+rotation = 3.1415927
+color = Color(0.97, 0.95, 0.9, 0.9)
+polygon = PackedVector2Array(-12, -10, -12, -190, 26, -190, 26, -10)
+
+[node name="Sail4" type="Polygon2D" parent="Windmill/Sails"]
+rotation = 4.712389
+color = Color(0.97, 0.95, 0.9, 0.9)
+polygon = PackedVector2Array(-12, -10, -12, -190, 26, -190, 26, -10)
+
+[node name="Hub" type="Polygon2D" parent="Windmill/Sails"]
+color = Color(0.45, 0.3, 0.22, 1)
+polygon = PackedVector2Array(-12, -12, 12, -12, 12, 12, -12, 12)

@@ -11,6 +11,8 @@ extends Node2D
 ##   Items/   party items already in place when the party starts: instance the
 ##            item scenes (res://party/items/..., platform.tscn, trampoline.tscn);
 ##            turn them by quarter turns, flip them with scale.x = -1
+##   anything else: in a mod pack (res://mods/<mod>/maps/), any other node of the
+##            scene is added to the arena when the map is played (see MODDING.md)
 ## Then press "Save map" in the inspector: the map goes to user://maps (shows up
 ## in Party > Arena and in the game's map editor), or into `save_folder` (a mod's
 ## maps folder, for example). Run the scene (F6) to play it straight away.
@@ -33,6 +35,8 @@ func _ready() -> void:
 		return
 	# Run on its own (F6): play it.
 	var m := to_map()
+	if scene_file_path.begins_with("res://") and not ArenaMap.extra_nodes(self).is_empty():
+		m.scene = scene_file_path  # with its own nodes
 	var p := ArenaMap.problem(m)
 	if p != "":
 		push_error("Can't play this map: " + p)

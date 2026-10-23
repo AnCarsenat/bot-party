@@ -1,8 +1,8 @@
 {
   "name": "Example mod",
   "author": "Bot Party",
-  "version": "1.0",
-  "description": "A bumper, a long plank, a mint coin, a map and a game mode.",
+  "version": "1.1",
+  "description": "A bumper, a long plank, a mint coin, two maps (one made in Godot, with a windmill) and a game mode.",
   "items": {
     "bumper": {
       "name": "Bumper",
