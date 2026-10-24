@@ -225,9 +225,15 @@ func _pick(delta: float) -> void:
 	_tap("move_right" if posmod(target - at, n) <= posmod(at - target, n) else "move_left")
 
 
+## Like a person: ranks the cards it can take by how much it likes them, then
+## picks one at random, the higher ranked ones more likely (each rank is
+## RANK_ODDS times as likely as the one above it: Hard bots stick to their
+## favourite more, Easy ones less).
+const RANK_ODDS := [0.75, 0.6, 0.45]
+
+
 func _choose_card() -> int:
-	var best := -1
-	var best_score := -INF
+	var ranked := []
 	for i in ctl.box.size():
 		if ctl._taken(i):
 			continue
@@ -235,12 +241,20 @@ func _choose_card() -> int:
 		var like: float = _like(id)
 		if _party().ITEMS.get(id, {}).get("bomb", false) and ctl.placed_items().is_empty():
 			like = 0.1
-		var noise: float = [2.0, 1.0, 0.4][skill]
-		var score: float = like + _rng.randf() * noise
-		if score > best_score:
-			best_score = score
-			best = i
-	return best
+		ranked.append([like + _rng.randf() * 0.3, i])
+	if ranked.is_empty():
+		return -1
+	ranked.sort_custom(func(a, b): return a[0] > b[0])
+	var odds: float = RANK_ODDS[skill]
+	var total := 0.0
+	for k in ranked.size():
+		total += pow(odds, k)
+	var roll := _rng.randf() * total
+	for k in ranked.size():
+		roll -= pow(odds, k)
+		if roll <= 0.0:
+			return ranked[k][1]
+	return ranked[0][1]
 
 
 ## How much this bot wants an item, for its style.
@@ -428,6 +442,10 @@ func _candidates(p: Node) -> Array:
 	if p.is_on_floor() or p.coyote_timer > 0.0:
 		for dir in [-1, 0, 1]:
 			out.append(_inputs(dir, 0, 0, 30))
+		# Short steps, then stop: to get to the edge before a jump.
+		for dir in [-1, 1]:
+			for steps in [5, 12]:
+				out.append(_inputs(dir, 0, 0, steps))
 		for dir in [-1, 1]:
 			for hold in long:
 				out.append(_inputs(dir, now, hold, 56))
@@ -797,15 +815,18 @@ func _find_dangers(p: Node) -> Array:
 					track.grow_individual(half.x + margin, half.y + margin, half.x + margin, half.y + margin) if track else null, how,
 					c, half + Vector2(margin, margin)])
 		# Mines: touching the trigger is out (that's the hazard above). The blast
-		# only matters when someone else is close enough to set it off.
+		# only matters when someone else is about to touch it (right next to it
+		# and coming closer).
 		var blast = h.get_parent().get("radius") if h.get_parent() else null
 		if blast is float and h.get_parent().has_method("_on_touch") and h.monitoring:
 			var c: Vector2 = h.get_parent().global_position
 			var others := false
 			for o in ctl.players.values():
-				if is_instance_valid(o) and o != p and not o.get_meta("eliminated", false) and not o.get_meta("finished", false) \
-						and o.global_position.distance_to(c) < blast + 120.0:
-					others = true
+				if is_instance_valid(o) and o != p and not o.get_meta("eliminated", false) and not o.get_meta("finished", false):
+					var to: Vector2 = c - o.global_position
+					var soon: Vector2 = o.global_position + o.velocity * 0.25
+					if to.length() < 70.0 or soon.distance_to(c) < 60.0:
+						others = true
 			if others:
 				out.append([Rect2(c, Vector2.ZERO).grow(blast + margin), Vector2.ZERO, null, null])
 	# Crossbows: the bolts they're going to shoot.

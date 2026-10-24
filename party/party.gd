@@ -61,7 +61,7 @@ const BUILT_IN_ITEMS := {
 	"glue_pad": {"name": "Glue pad", "special": true, "scene": "res://party/items/glue_pad.tscn", "icon": "res://party/art/glue_pad.webp", "size": Vector2(64, 36), "offset": Vector2(0, 12), "weight": 7, "kind": "trap"},
 	"alt_plank": {"name": "Alternating plank", "special": true, "scene": "res://party/items/alt_plank.tscn", "icon": "res://party/art/alt_plank.webp", "size": Vector2(192, 30), "weight": 7, "kind": "help"},
 	"balloon": {"name": "Balloon", "special": true, "scene": "res://party/items/balloon.tscn", "icon": "res://party/art/balloon.webp", "size": Vector2(48, 64), "weight": 6, "kind": "help"},
-	"black_hole": {"name": "Black hole", "special": true, "bomb": true, "black_hole": true, "radius": 300.0, "icon": "res://party/art/black_hole.webp", "size": Vector2(64, 64), "weight": 3, "kind": "bomb"},
+	"black_hole": {"name": "Black hole", "special": true, "bomb": true, "black_hole": true, "radius": 340.0, "icon": "res://party/art/black_hole.webp", "size": Vector2(64, 64), "weight": 3, "kind": "bomb"},
 	# The card itself: turns into a special item when it's picked.
 	"special": {"name": "Special crate", "card": true, "icon": "res://party/art/special_crate.webp", "size": Vector2(64, 64), "weight": 0},
 }

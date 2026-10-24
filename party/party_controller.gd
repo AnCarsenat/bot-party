@@ -478,37 +478,106 @@ func _explode_fx(pos: Vector2, radius: float) -> void:
 		cam.shake(clampf(radius / 450.0, 0.25, 1.0))
 
 
-## Black hole: pulls in the items around it, then swallows them.
+## Black hole: drifts a little way (random direction), pulling in the items along
+## its path. Most of them are gone; the rest are spat out somewhere around where
+## it stops, any which way.
 func _black_hole(pos: Vector2, radius: float) -> void:
-	var victims := items_in_blast(pos, radius)
-	_black_hole_fx(pos, radius)
-	NetCheck.event(self, "_black_hole_fx", [pos, radius])
+	var end := (pos + Vector2.from_angle(_rng.randf() * TAU) * BLACK_HOLE_DRIFT * BLACK_HOLE_TIME) \
+		.clamp(build_area.position, build_area.end)
+	var victims := _items_near_path(pos, end, radius)
+	_black_hole_fx(pos, end, radius)
+	NetCheck.event(self, "_black_hole_fx", [pos, end, radius])
 	await get_tree().create_timer(BLACK_HOLE_TIME).timeout
 	if not is_inside_tree():
 		return
 	for item in victims:
-		if is_instance_valid(item):
-			Party.session.items.erase(item.get_meta("record"))
-			item.queue_free()
+		if not is_instance_valid(item) or item.is_queued_for_deletion():
+			continue
+		if _rng.randf() < BLACK_HOLE_SPIT:
+			_spit_out(item, end)
+		else:
+			_remove_item(item)
 	Party.save()
-	_explode_fx(pos, radius * 0.5)
-	NetCheck.event(self, "_explode_fx", [pos, radius * 0.5])
+	_explode_fx(end, radius * 0.5)
+	NetCheck.event(self, "_explode_fx", [end, radius * 0.5])
 
 
-const BLACK_HOLE_TIME := 2.5
+const BLACK_HOLE_TIME := 3.0
+const BLACK_HOLE_DRIFT := 110.0  # pixels per second
+const BLACK_HOLE_SPIT := 0.3     # share of what it catches that comes back out
 
 
-func _black_hole_fx(pos: Vector2, radius: float) -> void:
+## Placed items (not the ones hanging from others: they come along) within
+## `radius` of the line from `a` to `b`.
+func _items_near_path(a: Vector2, b: Vector2, radius: float) -> Array:
+	var out := []
+	for item in placed_items():
+		if item.get_parent() != _items:
+			continue
+		var p: Vector2 = item.global_position
+		if Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p) <= radius:
+			out.append(item)
+	return out
+
+
+## Takes an item (and what hangs from it) out of the party.
+func _remove_item(item: Node) -> void:
+	for n in [item] + item.find_children("*", "", true, false):
+		if n.has_meta("record"):
+			Party.session.items.erase(n.get_meta("record"))
+			_by_uid.erase(int(n.get_meta("record").get("uid", -1)))
+	item.queue_free()
+
+
+## Puts an item somewhere else around `center`, turned and flipped at random
+## (new ids, so online players get it where it landed).
+func _spit_out(item: Node, center: Vector2) -> void:
+	var rec: Dictionary = item.get_meta("record")
+	var hanging := []
+	for n in item.find_children("*", "", true, false):
+		if n.has_meta("record"):
+			hanging.append(n.get_meta("record"))
+	_by_uid.erase(int(rec.uid))
+	for h in hanging:
+		_by_uid.erase(int(h.uid))
+	item.queue_free()
+	var spot := center
+	var rot := _rng.randi() % 4
+	for tries in 12:
+		spot = (center + Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(140.0, 420.0)).clamp(build_area.position, build_area.end)
+		if can_place(rec.id, spot, rot):
+			break
+	rec.x = spot.x
+	rec.y = spot.y
+	rec.rot = rot
+	rec.mirror = _rng.randf() < 0.5
+	rec.uid = _new_uid()
+	var node := _spawn_item(rec.id, spot, int(rec.owner), rec)
+	if node == null:
+		Party.session.items.erase(rec)
+		for h in hanging:
+			Party.session.items.erase(h)
+		return
+	for h in hanging:
+		h.host = rec.uid
+		h.uid = _new_uid()
+		if _spawn_item(h.id, Vector2.ZERO, int(h.owner), h) == null:
+			Party.session.items.erase(h)
+	_items.add_child(Effects.ring(spot, 50.0, Color(0.59, 0.37, 0.82)))
+
+
+func _black_hole_fx(pos: Vector2, end: Vector2, radius: float) -> void:
 	var hole := _Hole.new()
 	hole.position = pos
 	hole.radius = radius
 	_items.add_child(hole)
-	# The items spiral in (what hangs from them comes along).
-	for item in items_in_blast(pos, radius):
-		if item.get_parent() == _items:
-			var tw: Tween = item.create_tween().set_parallel()
-			tw.tween_property(item, "global_position", pos, BLACK_HOLE_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-			tw.tween_property(item, "scale", item.scale * 0.2, BLACK_HOLE_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	hole.create_tween().tween_property(hole, "position", end, BLACK_HOLE_TIME).set_trans(Tween.TRANS_SINE)
+	# The items spiral in, following it (what hangs from them comes along).
+	for item in _items_near_path(pos, end, radius):
+		var tw: Tween = item.create_tween().set_parallel()
+		tw.tween_property(item, "global_position", end, BLACK_HOLE_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tw.tween_property(item, "scale", item.scale * 0.2, BLACK_HOLE_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		tw.tween_property(item, "rotation", item.rotation + TAU * 2.0, BLACK_HOLE_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 
 
 ## The black hole's swirl.
