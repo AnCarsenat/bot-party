@@ -85,7 +85,6 @@ class Bubble extends Control:
 		if size != s:
 			size = s
 			_box.size = s - Vector2(12, 12)
-			_view.size = Vector2i(_box.size)
 			queue_redraw()
 		_cam.zoom = Vector2.ONE * DistantPlayers.zoom()
 

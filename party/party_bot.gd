@@ -20,6 +20,9 @@ const SKILL_NAMES := ["Easy", "Normal", "Hard"]
 ##   builder: platforms, where they help it reach the flag;
 ##   chaos:   bombs and odd items, anywhere.
 const STYLES := ["normal", "trapper", "builder", "chaos"]
+## Frames a bot looks ahead at the spot where a move ends: a trap coming
+## through there soon makes it a bad place to stop.
+const REST_LOOK := 45
 ## Seconds a bot takes to pick an item, by skill.
 const PICK_TIME := [Vector2(3.0, 4.5), Vector2(2.5, 3.5), Vector2(2.0, 2.5)]
 ## Seconds before it puts its item down (moving it there included).
@@ -555,6 +558,8 @@ func _score(sim: Dictionary, plan: Array) -> float:
 		score += 1.5
 	if sim.get("crumble", false):
 		score += 2.0  # don't stop on a crumbling block
+	# Stopping where a trap is about to sweep through: a dead end (the sooner, the worse).
+	score += sim.get("threat", 0.0) * 30.0
 	if plan[0][1] or plan[mini(10, plan.size() - 1)][1]:
 		score += 0.3  # don't jump for nothing
 	return score
@@ -693,10 +698,23 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 			stop_at = i + 1  # landed
 		i += STEP
 	_motion.exclude_bodies = [] as Array[RID]
+	# Standing where we stop: does a trap come through soon?
+	var threat := 0.0
+	if on_floor:
+		for j in range(0, REST_LOOK, 3):
+			var t := (i + j) / 60.0
+			for d in _dangers:
+				if d[2] != null and is_instance_valid(d[2]) and not d[2].firing_in(t):
+					continue
+				if _moved(d, t).has_point(pos):
+					threat = 1.0 - float(j) / REST_LOOK
+					break
+			if threat > 0.0:
+				break
 	# Ending up on a plank that's about to go: like a crumbling block, not a place to stop.
 	if on_floor and on_flicker != null and is_instance_valid(on_flicker) and not on_flicker.solid_in(i / 60.0 + 0.9):
 		on_crumble = true
-	return {"pos": pos, "dead": false, "floor": on_floor, "frames": stop_at, "crumble": on_crumble and on_floor}
+	return {"pos": pos, "dead": false, "floor": on_floor, "frames": stop_at, "crumble": on_crumble and on_floor, "threat": threat}
 
 
 ## Traps where they are now (the list is only made again every few plans; the

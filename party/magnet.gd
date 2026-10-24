@@ -35,5 +35,7 @@ func _draw() -> void:
 	# Field lines drifting inwards.
 	for k in 3:
 		var r := reach * (1.0 - fmod(_t * 0.35 + k / 3.0, 1.0))
-		draw_arc(Vector2.ZERO, r, 0.0, TAU, 48, Color(0.9, 0.31, 0.24, 0.18 * (1.0 - r / reach) + 0.05), 3.0)
+		draw_arc(Vector2.ZERO, r, 0.0, TAU, 48, Color(0.9, 0.31, 0.24, 0.35 * (1.0 - r / reach) + 0.15), 4.0)
+	# Its reach, so you can see what it'll pull.
+	draw_arc(Vector2.ZERO, reach, 0.0, TAU, 64, Color(0.9, 0.31, 0.24, 0.3), 2.0)
 	draw_texture_rect(TEX, Rect2(-32, -32, 64, 64), false)
