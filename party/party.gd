@@ -89,6 +89,7 @@ func _ready() -> void:
 
 ## Items from mods come and go with their on/off switch.
 func reload_items() -> void:
+	_arena_cache = []  # mod maps may have come or gone
 	ITEMS = BUILT_IN_ITEMS.duplicate(true)
 	var mods := get_node_or_null("/root/Mods")
 	if mods:
@@ -298,12 +299,22 @@ func use_map(m: Dictionary) -> void:
 
 ## Arena choices for the menu: [{id, name}].
 func arena_options() -> Array:
+	# Kept for a moment: the menu asks for it every time it draws.
+	var now := Time.get_ticks_msec()
+	if not _arena_cache.is_empty() and now - _arena_cache_at < 1000:
+		return _arena_cache
 	var out := [{"id": "random", "name": "Random"}]
 	for i in ARENAS.size():
 		out.append({"id": ARENAS[i], "name": ARENA_NAMES[i]})
 	for m in ArenaMap.list_all():
 		out.append({"id": "map:" + m.path, "name": m.name + ("  (mod)" if m.mod else "")})
+	_arena_cache = out
+	_arena_cache_at = now
 	return out
+
+
+var _arena_cache := []
+var _arena_cache_at := 0
 
 
 func arena_choice_name() -> String:

@@ -72,7 +72,11 @@ static func load_file(path: String) -> Dictionary:
 		return load_scene(path)
 	if not FileAccess.file_exists(path):
 		return {}
-	var data = JSON.parse_string(FileAccess.get_file_as_string(path))
+	# (Quietly: a broken file in the maps folder is just left out.)
+	var json := JSON.new()
+	if json.parse(FileAccess.get_file_as_string(path)) != OK:
+		return {}
+	var data = json.data
 	return normalize(data) if data is Dictionary else {}
 
 

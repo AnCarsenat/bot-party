@@ -167,7 +167,8 @@ func _read(path: String) -> Dictionary:
 	var file := path.path_join("mod.json")
 	var data = {}
 	if FileAccess.file_exists(file):
-		data = JSON.parse_string(FileAccess.get_file_as_string(file))
+		var json := JSON.new()
+		data = json.data if json.parse(FileAccess.get_file_as_string(file)) == OK else null
 	elif not DirAccess.dir_exists_absolute(path.path_join("maps")):
 		return {}  # not a mod (a map pack needs no mod.json, only maps/)
 	var m := _entry(ArenaMap.slug(path.get_file()), path.get_file())
