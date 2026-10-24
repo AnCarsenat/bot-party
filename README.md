@@ -15,6 +15,8 @@ or against bots.
 - **Party:** each round, everyone picks an item (saws, crossbows, fans, ferris
   wheels, paper planes...), places it on the course, then races to the flag.
   Reach the flag where the others can't, and score with the traps you placed.
+  Now and then a **Special crate** turns up with one of 14 special items: bear
+  traps, punching gloves, magnets, balloons, a hydrogen bomb, a black hole...
   Rules, game modes and item odds can all be changed.
 - **Online:** host a game for your friends, or find one on the server list.
   Several people can play on each computer.
@@ -83,11 +85,17 @@ once: give each player keys that are further apart.
 
 Turn and Flip rotate and mirror items while you place them in party mode.
 
-- **Bots:** in **Players**, left/right sets how many and up/down how good they are.
-  They play in party mode.
+- **Players:** jump to join or leave. Choose a slot with the arrows (or the
+  mouse): **Delete** removes whoever is in it, even if their keys or gamepad are
+  gone, and **+** (or Insert) puts a bot in a free slot, or changes how good a
+  bot is. Each player's turn key also removes, and their flip key adds a bot.
+- **Bots** play in party mode, shown as B1, B2... Each bot can be Easy, Normal or
+  Hard, takes about as long as a person to pick an item, and gets a way of playing
+  for each party (normal, trapper, builder or chaos).
 - **Party rules:** **Party → Rules** sets the game mode, the winning score, the
-  round time, coins, surprise rules and item odds. **Party → Items** turns items
-  on and off.
+  round time, coins, surprise rules, how often Special crates show up, and item
+  odds. **Party → Items** turns items on and off, special ones included.
+- **Settings → Screen shake** turns off the shake of explosions.
 - **Console:** ² or F1 (`help` lists the commands). It has cheats, `keys` (shows
   which keys the game receives), `savestate` / `loadstate`, and `inspect` (an
   in-game node and property editor).
@@ -119,8 +127,10 @@ bot-party -- --help
 ## Making maps and mods
 
 - **Map editor:** **Party → Map editor**. Draw ground as polygons, add planks,
-  the start area, the flag and party items, with grid and object snapping. Test
-  the map straight from the editor. Saved maps appear in **Party → Arena**.
+  the start area, the flag and party items, with grid and object snapping. Draw
+  the map's bounds yourself (B) or leave them automatic. Copy, cut, paste and
+  mirror (H) what's selected. Test the map straight from the editor. Saved maps
+  appear in **Party → Arena**, with a picture of each.
 - **In Godot:** open `editor/arena_template.tscn` and edit it with Godot's own
   tools. Press **Save map**, or press F6 to play it.
 - **Mods** add items, maps, textures and game modes. Make them in Godot with

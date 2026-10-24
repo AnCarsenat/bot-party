@@ -22,7 +22,7 @@ const SCENE := "res://party/custom_arena.tscn"
 
 
 ## The parts of a map scene (editor/arena_template.tscn) that make up the map.
-const SCENE_PARTS := ["Ground", "Planks", "Start", "Flag", "Items"]
+const SCENE_PARTS := ["Ground", "Planks", "Start", "Flag", "Items", "Bounds"]
 
 
 static func blank(name := "New map") -> Dictionary:
@@ -129,6 +129,10 @@ static func normalize(data: Dictionary) -> Dictionary:
 				m.ground.append(_box(b[0], b[1], b[2], b[3]))
 	if data.get("scene") is String and str(data.scene).begins_with("res://"):
 		m.scene = data.scene
+	# Bounds drawn by hand (optional: without them, they come from what's in the map).
+	var b = data.get("bounds")
+	if b is Array and b.size() >= 4:
+		m.bounds = [int(b[0]), int(b[1]), maxi(MIN_BOUNDS, int(b[2])), maxi(MIN_BOUNDS, int(b[3]))]
 	m.format = FORMAT
 	m.name = str(m.name).left(40)
 	m.author = str(m.author).left(40)
@@ -196,8 +200,18 @@ static func goal_zone(m: Dictionary) -> Rect2:
 	return Rect2(m.goal[0] - 220, m.goal[1] - 240, 440, 260)
 
 
-## Everything in the map, plus room to build above and around it.
+const MIN_BOUNDS := 200
+
+
+## Where items can be built and the camera looks: the bounds drawn in the editor,
+## or everything in the map plus room to build above and around it ("auto").
 static func build_area(m: Dictionary) -> Rect2:
+	if m.has("bounds"):
+		return rect(m.bounds)
+	return auto_bounds(m)
+
+
+static func auto_bounds(m: Dictionary) -> Rect2:
 	var r := start_zone(m).merge(goal_zone(m))
 	for poly in m.ground:
 		r = r.merge(poly_rect(poly))
@@ -255,6 +269,8 @@ static func problem(m: Dictionary) -> String:
 		return "The start area needs ground inside it"
 	if goal_zone(m).intersects(z):
 		return "The flag is too close to the start"
+	if m.has("bounds") and not (build_area(m).encloses(z) and build_area(m).has_point(Vector2(m.goal[0], m.goal[1] - 10))):
+		return "The bounds must hold the start area and the flag"
 	var g := Vector2(m.goal[0], m.goal[1])
 	if not solid_at(m, g + Vector2(0, 4)) or solid_at(m, g - Vector2(0, 4)):
 		return "The flag must stand on top of ground"

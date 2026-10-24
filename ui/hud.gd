@@ -128,15 +128,45 @@ func _process(_delta: float) -> void:
 var _chip_state := ""
 
 
+## Status icons (party traps) shown under a player's chip.
+const STATUS_ICONS := {
+	"stuck": preload("res://party/art/status_stuck.webp"),
+	"slippery": preload("res://party/art/status_slippery.webp"),
+	"slowed": preload("res://party/art/status_slowed.webp"),
+	"floating": preload("res://party/art/status_floating.webp"),
+}
+
+
 func _update_players() -> void:
 	var players := get_tree().get_nodes_in_group("players")
 	var state := ""
 	for p in players:
-		state += "%d%s," % [p.get_meta("player_index", 0), "x" if p.get_meta("eliminated", false) else ""]
+		var st = p.get("statuses")
+		state += "%d%s%s," % [p.get_meta("player_index", 0), "x" if p.get_meta("eliminated", false) else "",
+			":".join(st.keys()) if st is Dictionary else ""]
 	if state == _chip_state:
 		return
 	_chip_state = state
 	for c in _players_box.get_children():
 		c.queue_free()
 	for p in players:
-		_players_box.add_child(UiTheme.player_chip(p.get_meta("player_index", 0) + 1, p.get_meta("eliminated", false)))
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 2)
+		col.add_child(UiTheme.player_chip(p.get_meta("player_index", 0) + 1, p.get_meta("eliminated", false)))
+		var icons := HBoxContainer.new()
+		icons.alignment = BoxContainer.ALIGNMENT_CENTER
+		icons.add_theme_constant_override("separation", 2)
+		icons.custom_minimum_size = Vector2(0, 32)
+		var st = p.get("statuses")
+		if st is Dictionary and not p.get_meta("eliminated", false):
+			for k in st:
+				if STATUS_ICONS.has(k):
+					var t := TextureRect.new()
+					t.texture = STATUS_ICONS[k]
+					t.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+					t.custom_minimum_size = Vector2(32, 32)
+					t.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+					t.tooltip_text = k.capitalize()
+					icons.add_child(t)
+		col.add_child(icons)
+		_players_box.add_child(col)

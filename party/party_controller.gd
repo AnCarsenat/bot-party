@@ -77,7 +77,7 @@ func _ready() -> void:
 	mode.setup(self)
 	for b in Party.bots():
 		if b in slots:
-			var bot := PartyBot.new(b, Party.bots()[b])
+			var bot := PartyBot.new(b, Party.bots()[b], Party.bot_style(b))
 			bot.ctl = self
 			add_child(bot)
 	for rec in Party.session.items.duplicate():
@@ -101,6 +101,7 @@ func _ready() -> void:
 ## Gives `slot` this item: replaces what they're placing, or what their cursor is on.
 func give_item(slot: int, id: String) -> String:
 	if phase == Phase.PLACE and ghosts.get(slot) != null:
+		id = _open_card(id)
 		var pos: Vector2 = ghosts[slot].global_position
 		ghosts[slot].queue_free()
 		var g := _make_ghost(id, slot)
@@ -132,6 +133,7 @@ func place_item(slot: int, id: String) -> String:
 		return give_item(slot, id)
 	if not slot in slots:
 		return "P%d isn't in this party" % slot
+	id = _open_card(id)
 	if ghosts.get(slot) != null and is_instance_valid(ghosts[slot]):
 		ghosts[slot].queue_free()
 	var g := _make_ghost(id, slot)
@@ -468,6 +470,66 @@ func _explode_fx(pos: Vector2, radius: float) -> void:
 	_items.add_child(Effects.ring(pos, radius, Color(1, 0.6, 0.2)))
 	if radius > 200.0:
 		_items.add_child(Effects.ring(pos, radius * 0.6, Color(1, 0.9, 0.5)))
+	if radius > 400.0:
+		_items.add_child(Effects.ring(pos, radius * 0.3, Color.WHITE))
+	# Bombs shake the screen (bigger bombs, more); traps never do.
+	var cam := _camera()
+	if cam and cam.has_method("shake"):
+		cam.shake(clampf(radius / 450.0, 0.25, 1.0))
+
+
+## Black hole: pulls in the items around it, then swallows them.
+func _black_hole(pos: Vector2, radius: float) -> void:
+	var victims := items_in_blast(pos, radius)
+	_black_hole_fx(pos, radius)
+	NetCheck.event(self, "_black_hole_fx", [pos, radius])
+	await get_tree().create_timer(BLACK_HOLE_TIME).timeout
+	if not is_inside_tree():
+		return
+	for item in victims:
+		if is_instance_valid(item):
+			Party.session.items.erase(item.get_meta("record"))
+			item.queue_free()
+	Party.save()
+	_explode_fx(pos, radius * 0.5)
+	NetCheck.event(self, "_explode_fx", [pos, radius * 0.5])
+
+
+const BLACK_HOLE_TIME := 2.5
+
+
+func _black_hole_fx(pos: Vector2, radius: float) -> void:
+	var hole := _Hole.new()
+	hole.position = pos
+	hole.radius = radius
+	_items.add_child(hole)
+	# The items spiral in (what hangs from them comes along).
+	for item in items_in_blast(pos, radius):
+		if item.get_parent() == _items:
+			var tw: Tween = item.create_tween().set_parallel()
+			tw.tween_property(item, "global_position", pos, BLACK_HOLE_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+			tw.tween_property(item, "scale", item.scale * 0.2, BLACK_HOLE_TIME).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+
+
+## The black hole's swirl.
+class _Hole extends Node2D:
+	var radius := 300.0
+	var _t := 0.0
+
+	func _process(delta: float) -> void:
+		_t += delta
+		if _t > BLACK_HOLE_TIME + 0.3:
+			queue_free()
+		queue_redraw()
+
+	func _draw() -> void:
+		var grow := minf(1.0, _t * 3.0) * (1.0 if _t < BLACK_HOLE_TIME else maxf(0.0, 1.0 - (_t - BLACK_HOLE_TIME) * 4.0))
+		draw_circle(Vector2.ZERO, 46.0 * grow, Color.BLACK)
+		for k in 6:
+			var a := _t * 3.0 + k * TAU / 6.0
+			var r := radius * fmod(1.0 - _t * 0.6 + k / 6.0, 1.0)
+			draw_arc(Vector2.ZERO, r * grow, a, a + 1.2, 16, Color(0.59, 0.37, 0.82, 0.6), 4.0)
+		draw_arc(Vector2.ZERO, 50.0 * grow, 0.0, TAU, 32, Color(0.59, 0.37, 0.82), 6.0)
 
 
 # --- Phases --------------------------------------------------------------------
@@ -495,6 +557,9 @@ func _start_pick() -> void:
 		var id: String = Party.pick_item(_rng, bomb_ids if no_bombs else [])
 		if id in bomb_ids:
 			no_bombs = true
+		# Now and then a Special crate instead (Party > Rules > Specials).
+		if _rng.randf() < Party.special_odds() and Party.pick_special(_rng) != "":
+			id = "special"
 		box.append(id)
 	_overview()
 	cursors.clear()
@@ -516,7 +581,7 @@ func _start_place() -> void:
 	mirrors.clear()
 	for i in slots.size():
 		var slot := slots[i]
-		var id := box[picks[slot]]
+		var id := _open_card(box[picks[slot]])
 		turns[slot] = 0
 		mirrors[slot] = false
 		var g := _make_ghost(id, slot)
@@ -554,6 +619,16 @@ func _overview() -> void:
 	tw.tween_property(cam, "zoom", Vector2(z, z), 0.6)
 
 
+## A Special crate card becomes one of the special items.
+func _open_card(id: String) -> String:
+	if not Party.ITEMS.get(id, {}).get("card", false):
+		return id
+	var special := Party.pick_special(_rng)
+	if special == "" or (Party.ITEMS[special].get("bomb", false) and Party.session.items.is_empty()):
+		special = Party.pick_item(_rng)
+	return special
+
+
 func _make_ghost(id: String, slot: int) -> Node2D:
 	var def: Dictionary = Party.ITEMS[id]
 	var g: Node2D
@@ -581,7 +656,9 @@ func _place(slot: int) -> void:
 	var pos := g.global_position
 	g.queue_free()
 	ghosts[slot] = null
-	if Party.ITEMS[id].get("bomb", false):
+	if Party.ITEMS[id].get("black_hole", false):
+		_black_hole(pos, float(Party.ITEMS[id].radius))
+	elif Party.ITEMS[id].get("bomb", false):
 		_explode(pos, float(Party.ITEMS[id].radius))
 	else:
 		var rec := {"id": id, "x": pos.x, "y": pos.y, "owner": slot, "rot": turns.get(slot, 0),
@@ -622,7 +699,7 @@ func _start_countdown() -> void:
 		var p := _spawner.spawn(slots[i], pos, slots.size() > 1)
 		p.set_ghostly(true)  # party: run through each other, no standing on heads
 		if Party.bots().has(slots[i]) and p.has_node("Tag"):
-			p.get_node("Tag").text = "Bot"
+			p.get_node("Tag").text = Party.label(slots[i])
 		p.set_physics_process(false)
 		players[slots[i]] = p
 		if modifier != "":
@@ -667,7 +744,7 @@ func _start_score() -> void:
 		_banner.text = "Nobody made it"
 		_sub.text = "No points this round"
 	else:
-		_banner.text = "P%d takes the round" % finished[0] if finished.size() == 1 else "Round over"
+		_banner.text = "%s takes the round" % Party.label(finished[0]) if finished.size() == 1 else "Round over"
 		for s in finished:
 			gains[s] += Party.POINTS_FINISH
 		if finished.size() > 1:
@@ -702,10 +779,10 @@ func _start_score() -> void:
 			winner = s
 	if winner != 0:
 		phase = Phase.OVER
-		_banner.text = "P%d wins the party!" % winner
+		_banner.text = "%s wins the party!" % Party.label(winner)
 		_sub.text = ""
 		await get_tree().create_timer(3.0).timeout
-		Party.end_game("P%d wins the party!" % winner)
+		Party.end_game("%s wins the party!" % Party.label(winner))
 	else:
 		_sub.text = ""
 		_start_pick()
@@ -868,7 +945,7 @@ func _on_goal(body: Node) -> void:
 	body.remove_from_group("camera_follow")
 	create_tween().tween_property(body, "modulate:a", 0.0, 0.3)  # our tween: the body gets disabled
 	body.set_deferred("process_mode", Node.PROCESS_MODE_DISABLED)
-	_sub.text = "P%d made it!" % slot
+	_sub.text = "%s made it!" % Party.label(slot)
 	mode.player_finished(self, slot)
 
 
@@ -1082,7 +1159,7 @@ class _Card extends Control:
 		draw_texture_rect_region(FACE, r, src)
 
 	func _tag(at: Vector2, slot: int) -> void:
-		var text := "P%d" % slot
+		var text := Party.label(slot)
 		var w := UiTheme.FONT_BOLD.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x + 14
 		var r := Rect2(at - Vector2(w / 2.0, 0), Vector2(w, 24))
 		draw_rect(r, PlayerSpawner.COLORS[(slot - 1) % 8])
@@ -1100,6 +1177,9 @@ class _Card extends Control:
 			draw_rect(r, UiTheme.INK, false, 9.0)
 			draw_rect(r, PlayerSpawner.COLORS[(hovering[k] - 1) % 8], false, 5.0)
 		draw_style_box(_frame_lime if not hovering.is_empty() else _frame_crate, card)
+		if def.get("card", false):
+			# A Special crate: gold edge, it holds a special item.
+			draw_rect(card.grow(-5), Color("ecdb3d"), false, 4.0)
 		# Icon and name.
 		if _icon == null:
 			_icon = Party.icon(item)

@@ -8,6 +8,8 @@ extends Node2D
 ##   Planks/  Polygon2D rectangles: one-way planks (only their width and top count)
 ##   Start    a Polygon2D rectangle: the start area
 ##   Flag     a Marker2D: where the flag stands (on top of ground)
+##   Bounds   (optional) a Polygon2D rectangle: where items can be built and the
+##            camera looks. Without it, the bounds are worked out from the map.
 ##   Items/   party items already in place when the party starts: instance the
 ##            item scenes (res://party/items/..., platform.tscn, trampoline.tscn);
 ##            turn them by quarter turns, flip them with scale.x = -1
@@ -73,6 +75,10 @@ func to_map() -> Dictionary:
 	if flag is Node2D:
 		var g := _xform(flag).origin
 		m.goal = [int(round(g.x)), int(round(g.y))]
+	var bounds := get_node_or_null("Bounds")
+	if bounds is Polygon2D and bounds.polygon.size() >= 3:
+		var r := _rect_of(bounds)
+		m.bounds = [int(r.position.x), int(r.position.y), int(r.size.x), int(r.size.y)]
 	m.items = []
 	var items := get_node_or_null("Items")
 	if items:
@@ -142,6 +148,14 @@ func from_map(m: Dictionary) -> void:
 		add_child(flag)
 		flag.owner = _owner()
 	flag.position = Vector2(m.goal[0], m.goal[1])
+	var bounds := get_node_or_null("Bounds")
+	if m.has("bounds"):
+		if bounds == null:
+			bounds = _add_poly(self, "Bounds", PackedVector2Array(), Color(0.93, 0.86, 0.24, 0.12))
+		bounds.position = Vector2.ZERO
+		bounds.polygon = _rect_points(ArenaMap.rect(m.bounds))
+	elif bounds:
+		bounds.free()
 	var items := get_node_or_null("Items")
 	if items == null:
 		items = Node2D.new()

@@ -2,8 +2,10 @@ class_name PartyBot
 extends Node
 ## A computer player for party mode. It plays with the same controls as people
 ## (it presses its own slot's actions), so it follows the same rules:
-##   pick:  walks its cursor to the item it likes best and takes it;
-##   place: puts traps on the route the racers will take;
+##   pick:  looks over the cards for a few seconds, like a person, then takes the
+##          item it likes best;
+##   place: moves the item to a spot, which depends on how it plays (its style):
+##          traps on the route or near the flag, platforms that help, or anywhere;
 ##   race:  every few frames it tries a handful of moves (walk, wait, short and
 ##          long jumps, both ways) in a small physics simulation and keeps the one
 ##          that gets closest to the flag without touching a trap or falling out.
@@ -12,6 +14,16 @@ extends Node
 
 enum Skill { EASY, NORMAL, HARD }
 const SKILL_NAMES := ["Easy", "Normal", "Hard"]
+## How a bot plays, picked at random for each party:
+##   normal:  traps and helpful items, depending on the round;
+##   trapper: hazards, near the flag or on the main path;
+##   builder: platforms, where they help it reach the flag;
+##   chaos:   bombs and odd items, anywhere.
+const STYLES := ["normal", "trapper", "builder", "chaos"]
+## Seconds a bot takes to pick an item, by skill (a person takes about 4).
+const PICK_TIME := [Vector2(4.5, 6.0), Vector2(4.0, 5.0), Vector2(3.5, 4.0)]
+## Seconds before it puts its item down (moving it there included).
+const PLACE_TIME := [Vector2(3.5, 5.5), Vector2(3.0, 4.5), Vector2(2.5, 3.5)]
 
 const CELL := 32.0
 const BODY := Vector2(82, 82)  # the player's collision box (player.tscn)
@@ -20,11 +32,21 @@ const ACTIONS := ["move_left", "move_right", "move_up", "move_down", "action_1",
 ## How much the bot likes each item (traps first). Unknown items (mods): 2.
 const LIKES := {"saw": 4.0, "crossbow": 3.5, "flamer": 3.0, "planes": 1.2, "spikes": 2.5, "mine": 2.5,
 	"pendulum": 2.0, "ferris": 1.5, "slider": 1.5, "fan": 2.0, "conveyor": 1.5, "crumble": 1.5,
-	"block": 1.2, "plank": 1.0, "trampoline": 1.0, "lift": 1.0, "bomb": 1.5, "nuke": 2.5}
-const TRAPS := ["saw", "crossbow", "flamer", "spikes", "mine", "pendulum", "crumble", "fan", "conveyor"]
+	"block": 1.2, "plank": 1.0, "trampoline": 1.0, "lift": 1.0, "bomb": 1.5, "nuke": 2.5,
+	# Special items (and the card that gives one).
+	"special": 3.0, "big_ferris": 1.5, "follower": 1.5, "sine_saw": 4.0, "h_bomb": 3.0, "bear_trap": 3.0,
+	"glove": 2.0, "spitter": 2.5, "special_crate": 2.0, "magnet": 1.5, "ice_block": 1.5, "glue_pad": 2.0,
+	"alt_plank": 1.2, "balloon": 1.2, "black_hole": 2.5}
+const TRAPS := ["saw", "crossbow", "flamer", "spikes", "mine", "pendulum", "crumble", "fan", "conveyor",
+	"sine_saw", "bear_trap", "spitter", "glue_pad", "ice_block", "magnet", "special_crate"]
+## Things that help you get to the flag.
+const PLATFORMS := ["block", "plank", "trampoline", "lift", "ferris", "slider", "big_ferris", "alt_plank", "balloon", "glove"]
+## Odd items a "chaos" bot goes for (besides bombs).
+const ODD := ["planes", "fan", "conveyor", "magnet", "balloon", "follower", "special", "special_crate", "glove", "pendulum"]
 
 var slot := 0
 var skill: int = Skill.NORMAL
+var style := "normal"
 var ctl: Node  # the PartyController
 
 var _rng := RandomNumberGenerator.new()
@@ -34,6 +56,9 @@ var _erased := {}          # action name -> its keys (given back when the bot le
 # Pick / place.
 var _wait := 0.0
 var _want := -1
+var _clock := 0.0          # seconds since the pick (or place) started
+var _decide_at := 0.0      # when it picks (or places)
+var _looks: Array = []     # cards it looks at before going to the one it wants
 var _target := Vector2.INF
 var _target_time := 0.0
 # Race.
@@ -59,9 +84,10 @@ var _motion := PhysicsTestMotionParameters2D.new()
 var _result := PhysicsTestMotionResult2D.new()
 
 
-func _init(for_slot := 0, bot_skill := Skill.NORMAL) -> void:
+func _init(for_slot := 0, bot_skill := Skill.NORMAL, bot_style := "normal") -> void:
 	slot = for_slot
 	skill = bot_skill
+	style = bot_style if bot_style in STYLES else "normal"
 	name = "Bot%d" % slot
 	# Before the controller and the players: a press is seen the same frame.
 	process_priority = -100
@@ -133,6 +159,12 @@ func _process(delta: float) -> void:
 		_phase = ctl.phase
 		_field_key = ""  # items were placed: the arena changed
 		_plan.clear()
+		_clock = 0.0
+		_want = -1
+		_looks.clear()
+		var span: Vector2 = (PICK_TIME if _phase == ctl.Phase.PICK else PLACE_TIME)[skill]
+		_decide_at = _rng.randf_range(span.x, span.y)
+		_wait = _rng.randf_range(0.4, 0.8)
 	match ctl.phase:
 		ctl.Phase.PICK:
 			_pick(delta)
@@ -150,19 +182,44 @@ func _process(delta: float) -> void:
 func _pick(delta: float) -> void:
 	if ctl.picks.has(slot):
 		return
+	_clock += delta
 	_wait -= delta
 	if _wait > 0.0:
 		return
-	_wait = pace() * _rng.randf_range(0.8, 1.3)
+	# A person's pace: one card at a time, now and then.
+	_wait = _rng.randf_range(0.35, 0.75)
 	if _want < 0 or ctl._taken(_want):
 		_want = _choose_card()
-	var at: int = ctl.cursors.get(slot, 0)
-	if at == _want:
-		_tap("action_1")
-		return
-	# Shorter way round (the cursor wraps and skips taken cards).
+		# Look at a card or two on the way (not every time).
+		_looks.clear()
+		for k in _rng.randi_range(0, 2):
+			_looks.append(_rng.randi() % ctl.box.size())
 	var n: int = ctl.box.size()
-	_tap("move_right" if posmod(_want - at, n) <= posmod(at - _want, n) else "move_left")
+	var at: int = ctl.cursors.get(slot, 0)
+	var left := _decide_at - _clock
+	# Running out of time: no more looking around, straight to the card it wants.
+	if left < (mini(posmod(_want - at, n), posmod(at - _want, n)) + 2) * 0.45:
+		_looks.clear()
+	var target: int = _want
+	while not _looks.is_empty() and ctl._taken(_looks[0]):
+		_looks.pop_front()
+	if not _looks.is_empty():
+		target = _looks[0]
+	if at == target:
+		if target != _want:
+			_looks.pop_front()
+			_wait = _rng.randf_range(0.5, 1.0)  # a look at it
+			return
+		if left <= 0.0:
+			_tap("action_1")
+		else:
+			_wait = left  # then take it
+		return
+	var steps := mini(posmod(target - at, n), posmod(at - target, n))
+	if target == _want and left < steps * 0.6:
+		_wait = clampf(left / maxf(1.0, steps + 1.0), 0.12, 0.4)  # hurry
+	# Shorter way round (the cursor wraps and skips taken cards).
+	_tap("move_right" if posmod(target - at, n) <= posmod(at - target, n) else "move_left")
 
 
 func _choose_card() -> int:
@@ -172,7 +229,7 @@ func _choose_card() -> int:
 		if ctl._taken(i):
 			continue
 		var id: String = ctl.box[i]
-		var like: float = LIKES.get(id, 2.0)
+		var like: float = _like(id)
 		if _party().ITEMS.get(id, {}).get("bomb", false) and ctl.placed_items().is_empty():
 			like = 0.1
 		var noise: float = [2.0, 1.0, 0.4][skill]
@@ -183,24 +240,41 @@ func _choose_card() -> int:
 	return best
 
 
+## How much this bot wants an item, for its style.
+func _like(id: String) -> float:
+	var like: float = LIKES.get(id, 2.0)
+	var def: Dictionary = _party().ITEMS.get(id, {})
+	match style:
+		"trapper":
+			like *= 1.7 if id in TRAPS else 0.5
+			if id == "follower" and not ctl.placed_items().is_empty():
+				like = 3.0  # traps can ride it
+		"builder":
+			like *= 2.0 if id in PLATFORMS else 0.5
+		"chaos":
+			like *= 2.2 if def.get("bomb", false) or id in ODD else 0.8
+	return like
+
+
 func _place(delta: float) -> void:
 	var g = ctl.ghosts.get(slot)
 	if g == null or not is_instance_valid(g):
 		return
 	var id: String = g.get_meta("item_id")
+	_clock += delta
 	_target_time += delta
 	if _target == Vector2.INF or _target_time > 4.0:
 		_target = _choose_spot(id)
 		_target_time = 0.0
-		if _rng.randf() < 0.5:
-			_tap("action_3")  # face the other way, sometimes
+		if _flip_for(id) != ctl.mirrors.get(slot, false):
+			_tap("action_3")
 	var to: Vector2 = _target - ctl.cursor[slot]
 	var close: float = ctl.ghost_speed * delta * 1.5
 	_hold("move_right", to.x > close)
 	_hold("move_left", to.x < -close)
 	_hold("move_down", to.y > close)
 	_hold("move_up", to.y < -close)
-	if absf(to.x) <= close and absf(to.y) <= close:
+	if absf(to.x) <= close and absf(to.y) <= close and _clock >= _decide_at:
 		_wait -= delta
 		if _wait <= 0.0:
 			_wait = pace()
@@ -211,7 +285,17 @@ func _place(delta: float) -> void:
 				_target_time = 99.0  # somewhere else
 
 
+## Mirrored or not: a punching glove launches towards the flag for a builder,
+## back towards the start for the others. Anything else: either way.
+func _flip_for(id: String) -> bool:
+	if id == "glove":
+		var flag_right: bool = ctl.goal_zone.get_center().x > ctl.start_zone.get_center().x
+		return not flag_right if style == "builder" else flag_right
+	return _rng.randf() < 0.5
+
+
 ## Where to put an item: traps on the route, near the ground; bombs on others' items.
+## Trappers go near the flag, builders fill gaps on the way, chaos bots go anywhere.
 func _choose_spot(id: String) -> Vector2:
 	var def: Dictionary = _party().ITEMS.get(id, {})
 	var turn: int = ctl.turns.get(slot, 0)
@@ -219,13 +303,31 @@ func _choose_spot(id: String) -> Vector2:
 		var others: Array = ctl.placed_items().filter(func(it): return it.get_meta("owner_slot", 0) != slot)
 		if not others.is_empty():
 			return others[_rng.randi() % others.size()].global_position
+	# A trap hanging from a free attachment point (a follower takes it to the racers).
+	if style == "trapper" and id in TRAPS and ctl.can_attach(id) and _rng.randf() < 0.6:
+		var mounts: Array = ctl.free_mounts()
+		if not mounts.is_empty():
+			return mounts[_rng.randi() % mounts.size()].global_position
 	var route := _route()
 	var size: Vector2 = def.get("size", Vector2(64, 64))
 	var offset: Vector2 = def.get("offset", Vector2.ZERO)
+	var span := Vector2(0.3, 0.92)
+	match style:
+		"trapper":
+			span = Vector2(0.65, 0.97)
+		"builder":
+			span = Vector2(0.2, 0.85)
+	if style == "builder" and id in PLATFORMS and not route.is_empty():
+		var gap := _gap_on(route)
+		if gap != Vector2.INF and ctl.can_place(id, gap, turn):
+			return gap
 	for attempt in 40:
 		var pos: Vector2
-		if not route.is_empty() and attempt < 30:
-			var k := int(route.size() * _rng.randf_range(0.3, 0.92))
+		if style == "chaos" and attempt < 20:
+			var area: Rect2 = ctl.build_area
+			pos = Vector2(_rng.randf_range(area.position.x, area.end.x), _rng.randf_range(area.position.y, area.end.y))
+		elif not route.is_empty() and attempt < 30:
+			var k := int(route.size() * _rng.randf_range(span.x, span.y))
 			pos = route[k]
 			if id in TRAPS or _rng.randf() < 0.6:
 				var floor_y := _floor_below(pos)
@@ -239,6 +341,18 @@ func _choose_spot(id: String) -> Vector2:
 		if ctl.can_place(id, pos, turn):
 			return pos
 	return ctl.cursor[slot]
+
+
+## Builders: a spot on the way with nothing to stand on below (a gap to fill),
+## just under where the route goes.
+func _gap_on(route: Array) -> Vector2:
+	var picks := []
+	for k in range(int(route.size() * 0.15), int(route.size() * 0.9)):
+		var p: Vector2 = route[k]
+		var fy := _floor_below(p)
+		if fy == INF or fy - p.y > 220.0:
+			picks.append(p + Vector2(0, 70))
+	return picks[_rng.randi() % picks.size()] if not picks.is_empty() else Vector2.INF
 
 
 func _floor_below(pos: Vector2) -> float:
@@ -256,6 +370,10 @@ func _physics_process(_delta: float) -> void:
 	if not is_instance_valid(p) or p.get_meta("eliminated", false) or p.get_meta("finished", false) or not p.is_physics_processing():
 		if not _held.is_empty():
 			_release_all()
+		return
+	if p.has_method("has_status") and p.has_status("stuck"):
+		_release_all()  # caught: nothing to do but wait
+		_plan.clear()
 		return
 	if _field_key == "":
 		_make_field()
@@ -559,7 +677,9 @@ func _find_dangers(p: Node) -> Array:
 	var half := BODY / 2.0 - Vector2(6, 6)  # the hurtbox is a bit smaller than the body
 	var margin: float = [-4.0, 4.0, 8.0][skill]
 	for h in ctl.get_parent().find_children("*", "Area2D", true, false):
-		if not h is Hazard or not h.is_inside_tree():
+		# Traps that take you out, and the ones best avoided (bear traps, spit).
+		var avoid: bool = h is StatusArea and h.avoid
+		if not (h is Hazard or avoid) or not h.is_inside_tree():
 			continue
 		# Traps that switch on and off (flamethrowers) say when they'll be on.
 		var timed = h.get_parent() if h.get_parent() and h.get_parent().has_method("firing_in") else null

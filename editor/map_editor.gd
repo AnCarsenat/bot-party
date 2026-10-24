@@ -3,18 +3,24 @@ extends Node2D
 ## and show up in Party > Arena.
 ##
 ## Tools:  V Select   P Ground (click points)   R Box   L Plank   S Start   F Flag
+##         B Bounds (drag: where items can be built and the camera looks; "Auto"
+##           in the left panel goes back to bounds worked out from the map)
 ## Select: click an object (Shift: add), drag it to move, drag on empty space to
 ##         select several. Selected ground shows its points: drag them, drag the
 ##         small dots between points to add one, right click a point to remove it.
 ##         Corner handles resize, the middle handle moves.
 ## Snapping: G toggles the grid, O toggles snapping to other objects' points and edges.
-## Also: Delete, Ctrl+D duplicate, Ctrl+A select all, Ctrl+Z / Ctrl+Y undo / redo,
+## Also: Delete, Ctrl+D duplicate, Ctrl+C / Ctrl+X / Ctrl+V copy, cut, paste (at the
+##       mouse), H / Shift+H mirror the selection, Ctrl+A select all, Ctrl+Z / Ctrl+Y undo / redo,
 ##       arrows nudge, middle drag (or Space + drag) pans, wheel zooms,
 ##       Ctrl+S save, F5 test, Esc back.
 
-const TOOLS := ["select", "ground", "box", "plank", "start", "flag"]
-const TOOL_NAMES := {"select": "Select", "ground": "Ground", "box": "Box", "plank": "Plank", "start": "Start", "flag": "Flag"}
-const TOOL_KEYS := {KEY_V: "select", KEY_P: "ground", KEY_R: "box", KEY_L: "plank", KEY_S: "start", KEY_F: "flag"}
+const TOOLS := ["select", "ground", "box", "plank", "start", "flag", "bounds"]
+const TOOL_NAMES := {"select": "Select", "ground": "Ground", "box": "Box", "plank": "Plank", "start": "Start", "flag": "Flag", "bounds": "Bounds"}
+const TOOL_KEYS := {KEY_V: "select", KEY_P: "ground", KEY_R: "box", KEY_L: "plank", KEY_S: "start", KEY_F: "flag", KEY_B: "bounds"}
+const YELLOW := Color("ecdb3d")
+## Copied objects (Ctrl+C), kept while the game runs: {ground, planks, items, center}.
+static var clipboard := {}
 const GRIDS := [8, 16, 32, 64]
 ## Shapes in the palette (drag them onto the map). Points around (0, 0).
 const SHAPES := {
@@ -157,7 +163,16 @@ func _build_ui() -> void:
 	tools.add_child(_small_title("Tools"))
 	for t in TOOLS:
 		var key: String = OS.get_keycode_string(TOOL_KEYS.find_key(t))
-		var b := _button(tools, "%s  %s" % [TOOL_NAMES[t], key], func(): _select_tool(t))
+		var parent: Control = tools
+		if t == "bounds":
+			# Bounds: draw them, or "Auto" to have them worked out from the map.
+			parent = HBoxContainer.new()
+			parent.add_theme_constant_override("separation", 4)
+			tools.add_child(parent)
+		var b := _button(parent, "%s  %s" % [TOOL_NAMES[t], key], func(): _select_tool(t))
+		if t == "bounds":
+			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			_button(parent, "Auto", _auto_bounds).tooltip_text = "Bounds worked out from the map"
 		b.toggle_mode = true
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		_tool_buttons[t] = b
@@ -176,7 +191,7 @@ func _build_ui() -> void:
 	# Right: tabs with the objects in the map, shapes and items to drag in.
 	var side := PanelContainer.new()
 	side.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
-	side.offset_left = -260
+	side.offset_left = -330
 	side.offset_top = 64
 	side.offset_bottom = -44
 	_root.add_child(side)
@@ -209,8 +224,10 @@ func _build_ui() -> void:
 	var actions := GridContainer.new()
 	actions.columns = 3
 	col.add_child(actions)
-	for spec in [["Copy", _duplicate], ["Delete", _delete], ["Turn  T", func(): _turn_items()],
-			["Up", func(): _reorder(1)], ["Down", func(): _reorder(-1)], ["Flip  M", func(): _flip_items()]]:
+	for spec in [["Duplicate", _duplicate], ["Delete", _delete], ["Turn  T", func(): _turn_items()],
+			["Copy", copy_selection], ["Cut", cut_selection], ["Paste", func(): paste(_mouse_world if _mouse_world != Vector2.ZERO else _cam.position)],
+			["Up", func(): _reorder(1)], ["Down", func(): _reorder(-1)], ["Flip  M", func(): _flip_items()],
+			["Mirror H", func(): mirror_selection(true)], ["Mirror V", func(): mirror_selection(false)]]:
 		var b := _button(actions, spec[0], spec[1])
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_info = Label.new()
@@ -245,7 +262,7 @@ func _build_ui() -> void:
 	items.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	items_tab.add_child(items)
 	for id in Party.ITEMS:
-		if Party.ITEMS[id].get("bomb", false):
+		if Party.ITEMS[id].get("bomb", false) or not Party.ITEMS[id].has("scene"):
 			continue
 		var b := _ShapeButton.new()
 		b.data = {"item": id}
@@ -351,7 +368,8 @@ func _status_text(extra := "") -> void:
 		"box": "Drag to draw a box of ground",
 		"plank": "Drag sideways for a one-way plank",
 		"start": "Drag the start area (players spawn here)",
-		"flag": "Click on top of the ground to put the flag"}[tool]
+		"flag": "Click on top of the ground to put the flag",
+		"bounds": "Drag the bounds: where items can be built and the camera looks (Auto: from the map)"}[tool]
 	var text: String = hint + "   ·   Grid %s (G)   Snap to objects %s (O)" % ["on" if grid_on else "off", "on" if snap_objects else "off"]
 	if p != "":
 		text = "! " + p + "   ·   " + text
@@ -365,6 +383,8 @@ func _status_text(extra := "") -> void:
 
 func _object_ids() -> Array[String]:
 	var out: Array[String] = ["start", "flag"]
+	if map.has("bounds"):
+		out.append("bounds")
 	for i in map.ground.size():
 		out.append("g%d" % i)
 	for i in map.planks.size():
@@ -380,6 +400,9 @@ func _object_name(id: String) -> String:
 			return "Start area"
 		"flag":
 			return "Flag"
+		"bounds":
+			var r := ArenaMap.build_area(map)
+			return "Bounds  (%d × %d)" % [r.size.x, r.size.y]
 	var i := int(id.substr(1))
 	if id[0] == "g":
 		return "Ground %d  (%d points)" % [i + 1, map.ground[i].size()]
@@ -485,9 +508,13 @@ func _delete() -> void:
 	_change(func():
 		_remove_objects(ids)
 		selection.clear())
+	if "bounds" in ids:
+		_refresh("Bounds: auto")
 
 
 func _remove_objects(ids: Array) -> void:
+	if "bounds" in ids:
+		map.erase("bounds")
 	for kind in [["g", "ground"], ["p", "planks"], ["i", "items"]]:
 		var idx := []
 		for id in ids:
@@ -574,6 +601,8 @@ func _bounds(id: String, m := {}) -> Rect2:
 			return ArenaMap.start_zone(m)
 		"flag":
 			return Rect2(m.goal[0] - 40, m.goal[1] - 160, 80, 160)
+		"bounds":
+			return ArenaMap.build_area(m)
 	var i := int(id.substr(1))
 	if id[0] == "g":
 		return ArenaMap.poly_rect(m.ground[i])
@@ -607,6 +636,12 @@ func hit(p: Vector2) -> String:
 			return "g%d" % i
 	if ArenaMap.start_zone(map).has_point(p):
 		return "start"
+	# The bounds hold everything: only their edge picks them.
+	if map.has("bounds"):
+		var b := ArenaMap.build_area(map)
+		var edge := 12.0 / _cam.zoom.x
+		if b.grow(edge).has_point(p) and not b.grow(-edge).has_point(p):
+			return "bounds"
 	return ""
 
 
@@ -695,7 +730,7 @@ func handles() -> Array:
 			out.append({"kind": "plank_end", "pos": Vector2(r.position.x, r.get_center().y), "side": -1})
 			out.append({"kind": "plank_end", "pos": Vector2(r.end.x, r.get_center().y), "side": 1})
 	var b := _selection_bounds()
-	var scalable := selection.any(func(id): return id[0] == "g" or id == "start")
+	var scalable := selection.any(func(id): return id[0] == "g" or id == "start" or id == "bounds")
 	if scalable:
 		var corners := [b.position, Vector2(b.end.x, b.position.y), b.end, Vector2(b.position.x, b.end.y)]
 		for k in 4:
@@ -739,7 +774,7 @@ func on_press(w: Vector2, shift := false) -> void:
 				_finish_polygon()
 			else:
 				_new_poly.append([int(p.x), int(p.y)])
-		"box", "plank", "start":
+		"box", "plank", "start", "bounds":
 			_drag = "new"
 			_drag_from = snap(w)
 		"flag":
@@ -866,6 +901,8 @@ func _move_object(id: String, d: Vector2) -> void:
 			map.start = [int(map.start[0] + d.x), int(map.start[1] + d.y), map.start[2], map.start[3]]
 		"flag":
 			map.goal = [int(map.goal[0] + d.x), int(map.goal[1] + d.y)]
+		"bounds":
+			map.bounds = [int(map.bounds[0] + d.x), int(map.bounds[1] + d.y), map.bounds[2], map.bounds[3]]
 		_:
 			var i := int(id.substr(1))
 			if id[0] == "g":
@@ -896,6 +933,11 @@ func _scale_object(id: String, anchor: Vector2, k: Vector2) -> void:
 	elif id == "flag":
 		var q: Vector2 = f.call(Vector2(map.goal[0], map.goal[1]))
 		map.goal = [int(q.x), int(q.y)]
+	elif id == "bounds":
+		var a: Vector2 = f.call(Vector2(map.bounds[0], map.bounds[1]))
+		var b: Vector2 = f.call(Vector2(map.bounds[0] + map.bounds[2], map.bounds[1] + map.bounds[3]))
+		var r := Rect2(a, Vector2.ZERO).expand(b)
+		map.bounds = [int(r.position.x), int(r.position.y), maxi(ArenaMap.MIN_BOUNDS, int(r.size.x)), maxi(ArenaMap.MIN_BOUNDS, int(r.size.y))]
 	elif id[0] == "i":
 		var q: Vector2 = f.call(Vector2(map.items[int(id.substr(1))].x, map.items[int(id.substr(1))].y))
 		map.items[int(id.substr(1))].x = int(q.x)
@@ -929,6 +971,14 @@ func on_release(w: Vector2, shift := false) -> void:
 				"start":
 					r.size = r.size.max(Vector2(160, 96))
 					_change(func(): map.start = [int(r.position.x), int(r.position.y), int(r.size.x), int(r.size.y)])
+				"bounds":
+					r.size = r.size.max(Vector2(ArenaMap.MIN_BOUNDS, ArenaMap.MIN_BOUNDS))
+					_change(func():
+						map.bounds = [int(r.position.x), int(r.position.y), int(r.size.x), int(r.size.y)]
+						selection.assign(["bounds"]))
+					tool = "select"
+					for k in _tool_buttons:
+						_tool_buttons[k].set_pressed_no_signal(k == tool)
 	_drag = ""
 	_drag_info = {}
 	_snap_mark = Vector2.INF
@@ -956,8 +1006,8 @@ func _box_select(r: Rect2, add: bool) -> void:
 		selection.clear()
 	for id in _object_ids():
 		if r.intersects(_bounds(id)) and not id in selection:
-			if id == "start" and not r.encloses(_bounds(id)):
-				continue  # the start area is big: only when it's all inside
+			if (id == "start" or id == "bounds") and not r.encloses(_bounds(id)):
+				continue  # big ones: only when they're all inside
 			selection.append(id)
 	points_sel.clear()
 
@@ -1015,6 +1065,117 @@ func drop_item(id: String, w: Vector2) -> void:
 	_select_tool("select")
 
 
+# --- Bounds, clipboard, mirroring ---------------------------------------------------------
+
+func _auto_bounds() -> void:
+	if map.has("bounds"):
+		_change(func():
+			map.erase("bounds")
+			selection.erase("bounds"))
+	_refresh("Bounds: auto")
+
+
+## Ctrl+C: ground, planks and items of the selection.
+func copy_selection() -> int:
+	var c := {"ground": [], "planks": [], "items": []}
+	for id in selection:
+		if not id[0] in ["g", "p", "i"] or not id.substr(1).is_valid_int():
+			continue
+		var i := int(id.substr(1))
+		match id[0]:
+			"g": c.ground.append(map.ground[i].duplicate(true))
+			"p": c.planks.append(map.planks[i].duplicate())
+			"i": c.items.append(map.items[i].duplicate())
+	var n: int = c.ground.size() + c.planks.size() + c.items.size()
+	if n == 0:
+		return 0
+	c.center = _selection_bounds().get_center()
+	clipboard = c
+	_refresh("Copied %d object%s" % [n, "s" if n > 1 else ""])
+	return n
+
+
+func cut_selection() -> void:
+	if copy_selection() > 0:
+		selection.assign(selection.filter(func(id): return id[0] in ["g", "p", "i"]))
+		_delete()
+
+
+## Ctrl+V: the copied objects, centred on `at` (snapped), selected.
+func paste(at: Vector2) -> void:
+	if clipboard.is_empty():
+		_refresh("Nothing copied yet (Ctrl+C)")
+		return
+	var center: Vector2 = clipboard.center
+	var d := (snap(at) - center).round()
+	_change(func():
+		var sel: Array[String] = []
+		for g in clipboard.ground:
+			map.ground.append(g.map(func(p): return [int(p[0] + d.x), int(p[1] + d.y)]))
+			sel.append("g%d" % (map.ground.size() - 1))
+		for p in clipboard.planks:
+			map.planks.append([int(p[0] + d.x), int(p[1] + d.y), p[2]])
+			sel.append("p%d" % (map.planks.size() - 1))
+		for it in clipboard.items:
+			var c: Dictionary = it.duplicate()
+			c.x = int(c.x + d.x)
+			c.y = int(c.y + d.y)
+			map.items.append(c)
+			sel.append("i%d" % (map.items.size() - 1))
+		selection = sel
+		points_sel.clear())
+
+
+## H: mirrors the selection left-right (Shift+H: upside down) around its middle.
+func mirror_selection(horizontal := true) -> void:
+	var ids := selection.filter(func(id): return id != "bounds")
+	if ids.is_empty():
+		return
+	var c := _selection_bounds().get_center()
+	var flip := func(p: Vector2) -> Vector2:
+		return Vector2(2.0 * c.x - p.x, p.y) if horizontal else Vector2(p.x, 2.0 * c.y - p.y)
+	_change(func():
+		for id in ids:
+			_mirror_object(id, flip, horizontal))
+	_refresh("Mirrored")
+
+
+func _mirror_object(id: String, flip: Callable, horizontal: bool) -> void:
+	match id:
+		"start":
+			var r := ArenaMap.start_zone(map)
+			var nr := Rect2(flip.call(r.position), Vector2.ZERO).expand(flip.call(r.end))
+			map.start = [int(nr.position.x), int(nr.position.y), int(nr.size.x), int(nr.size.y)]
+			return
+		"flag":
+			if horizontal:  # (upside down, the flag would hang under the ground)
+				var q: Vector2 = flip.call(Vector2(map.goal[0], map.goal[1]))
+				map.goal = [int(q.x), int(q.y)]
+			return
+	var i := int(id.substr(1))
+	match id[0]:
+		"g":
+			var pts: Array = map.ground[i].map(func(p):
+				var q: Vector2 = flip.call(Vector2(p[0], p[1]))
+				return [int(round(q.x)), int(round(q.y))])
+			pts.reverse()  # keep the points going the same way round
+			map.ground[i] = pts
+		"p":
+			var r := ArenaMap.plank_rect(map.planks[i])
+			var a: Vector2 = flip.call(r.position)
+			var b: Vector2 = flip.call(r.end)
+			var nr := Rect2(a, Vector2.ZERO).expand(b)
+			map.planks[i] = [int(nr.position.x), int(nr.position.y), map.planks[i][2]]
+		"i":
+			var it: Dictionary = map.items[i]
+			var q: Vector2 = flip.call(Vector2(it.x, it.y))
+			it.x = int(q.x)
+			it.y = int(q.y)
+			it.mirror = not it.mirror
+			if not horizontal:
+				it.rot = (int(it.rot) + 2) % 4  # upside down: half a turn, mirrored
+
+
 func _turn_items() -> void:
 	var ids := selection.filter(func(id): return id[0] == "i")
 	if not ids.is_empty():
@@ -1063,6 +1224,14 @@ func key(k: Key, ctrl := false, shift := false) -> bool:
 		_save()
 	elif ctrl and k == KEY_D:
 		_duplicate()
+	elif ctrl and k == KEY_C:
+		copy_selection()
+	elif ctrl and k == KEY_X:
+		cut_selection()
+	elif ctrl and k == KEY_V:
+		paste(_mouse_world)
+	elif k == KEY_H and not ctrl:
+		mirror_selection(not shift)
 	elif ctrl and k == KEY_A:
 		select_all()
 	elif k in [KEY_DELETE, KEY_BACKSPACE] and tool == "ground" and not _new_poly.is_empty():
@@ -1227,8 +1396,21 @@ func _draw() -> void:
 		while y < view.end.y:
 			draw_line(Vector2(view.position.x, y), Vector2(view.end.x, y), Color(1, 1, 1, 0.18 if int(y) % 256 == 0 else 0.07), px)
 			y += step
-	# Build area.
-	draw_rect(ArenaMap.build_area(map), Color(1, 1, 1, 0.35), false, 2.0 * px)
+	# Bounds: drawn by hand (yellow, dashed) or worked out from the map (faint).
+	var area := ArenaMap.build_area(map)
+	if map.has("bounds"):
+		var pts := [area.position, Vector2(area.end.x, area.position.y), area.end, Vector2(area.position.x, area.end.y)]
+		for k in 4:
+			var a: Vector2 = pts[k]
+			var b: Vector2 = pts[(k + 1) % 4]
+			var n := maxi(1, int(a.distance_to(b) * _cam.zoom.x / 16.0))
+			for i in n:
+				if i % 2 == 0:
+					draw_line(a.lerp(b, float(i) / n), a.lerp(b, float(i + 1) / n), YELLOW, 4.0 * px)
+		draw_string(UiTheme.FONT_BOLD, area.position + Vector2(10, 28) * px, "BOUNDS", HORIZONTAL_ALIGNMENT_LEFT, -1, int(20 * px), YELLOW)
+	else:
+		draw_rect(area, Color(1, 1, 1, 0.35), false, 2.0 * px)
+		draw_string(UiTheme.FONT_BOLD, area.position + Vector2(10, 28) * px, "Bounds: auto", HORIZONTAL_ALIGNMENT_LEFT, -1, int(18 * px), Color(1, 1, 1, 0.6))
 	# Start area.
 	var z := ArenaMap.start_zone(map)
 	draw_rect(z, Color(GREEN, 0.18))
@@ -1315,7 +1497,10 @@ func _draw() -> void:
 	# Shapes being drawn.
 	if _drag == "new":
 		var r := Rect2(_drag_from, Vector2.ZERO).expand(snap(_drag_now)).abs()
-		if tool == "plank":
+		if tool == "bounds":
+			draw_rect(r, Color(YELLOW, 0.12))
+			draw_rect(r, YELLOW, false, 3.0 * px)
+		elif tool == "plank":
 			r = Rect2(Vector2(r.position.x, _drag_from.y), Vector2(maxf(r.size.x, 64), 24))
 		draw_rect(r, Color(1, 1, 1, 0.4))
 		draw_rect(r, INK, false, 2.0 * px)

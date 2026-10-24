@@ -364,13 +364,13 @@ func _register_all() -> void:
 	# Party.
 	_add("bots", "bots <count> [easy|normal|hard]", "Party: computer players for the next new party.", func(a):
 		if a.is_empty():
-			return "%d bots, %s" % [Party.bot_count, PartyBot.SKILL_NAMES[Party.bot_skill]]
-		Party.bot_count = clampi(int(_arg(a, 0)), 0, GameState.MAX_PLAYERS - 1)
+			return ", ".join(Party.bot_slots().map(func(b): return "%s %s" % [Party.label(b), PartyBot.SKILL_NAMES[Party.bot_list[b]]])) if not Party.bot_list.is_empty() else "No bots"
 		var names := PartyBot.SKILL_NAMES.map(func(n): return n.to_lower())
+		var skill := 1
 		if a.size() > 1 and _arg(a, 1).to_lower() in names:
-			Party.bot_skill = names.find(_arg(a, 1).to_lower())
-		Party.save_weights()
-		return "%d bots, %s (from the next new party)" % [Party.bot_count, PartyBot.SKILL_NAMES[Party.bot_skill]])
+			skill = names.find(_arg(a, 1).to_lower())
+		Party.set_bots(int(_arg(a, 0)), skill)
+		return "%d bots, %s (from the next new party)" % [Party.bot_list.size(), PartyBot.SKILL_NAMES[skill]])
 	_add("items", "items", "List party item names.", func(_a): return ", ".join(Party.ITEMS.keys()))
 	var place_fn := func(a):
 		if not _ctl():

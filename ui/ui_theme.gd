@@ -71,6 +71,16 @@ static func button(text: String, on_pressed: Callable) -> Button:
 
 
 ## Small label for a player: "P2" in a box filled with the player's colour.
+## "P3", or "B1" for a bot in the party being played.
+static func slot_label(slot: int) -> String:
+	var tree := Engine.get_main_loop() as SceneTree
+	var party = tree.root.get_node_or_null("Party")
+	var scene := tree.current_scene
+	if party and scene and scene.has_node("PartyController"):
+		return party.label(slot)
+	return "P%d" % slot
+
+
 static func player_chip(slot: int, faded := false) -> PanelContainer:
 	var p := PanelContainer.new()
 	var box := StyleBoxFlat.new()
@@ -83,7 +93,7 @@ static func player_chip(slot: int, faded := false) -> PanelContainer:
 	box.content_margin_bottom = 2
 	p.add_theme_stylebox_override("panel", box)
 	var l := Label.new()
-	l.text = "P%d" % slot
+	l.text = slot_label(slot)
 	l.add_theme_font_override("font", FONT_BOLD)
 	l.add_theme_font_size_override("font_size", 18)
 	p.add_child(l)

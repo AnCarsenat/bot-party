@@ -129,6 +129,7 @@ Every key is optional except `name`.
 | `props` | Properties set on the scene's root node, for example `"modulate": "#ff8080"` or `"one_way": true`. `[x, y]` becomes a Vector2 and `"#rrggbb"` a Color. |
 | `host` | `true` if other items can hang from it (it needs a `mounts()` method, like the ferris wheel). |
 | `bomb` | `true` for a bomb: it has no scene and destroys items within `radius` pixels. |
+| `special` | `true` for a special item: it never shows up in the box itself, only out of Special crates. |
 
 The game's item scenes you can start from:
 
@@ -176,6 +177,10 @@ Things you can use:
   - `player.velocity` is the player's velocity.
 - To hurt players, add a `Hazard` (`res://party/hazard.gd`, an Area2D):
   touching it takes the player out, and the item's owner gets the trap points.
+- To slow them down instead, add a `StatusArea` (`res://party/status_area.gd`)
+  with `status` set to `stuck`, `slippery`, `slowed` or `floating`, and
+  `seconds`. Or call `player.add_status("slippery", 2.0)` yourself.
+  `player.pull(Vector2)` pulls a player for one frame (like the magnet).
 - `Party.session` holds the round, scores and placed items.
 
 In a mod pack, your scenes can use your pictures like any Godot scene. In a mod

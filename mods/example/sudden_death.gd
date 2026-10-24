@@ -9,7 +9,7 @@ func _init() -> void:
 
 
 func player_finished(ctl: Node, slot: int) -> void:
-	ctl.say("P%d takes it all!" % slot)
+	ctl.say("%s takes it all!" % Party.label(slot))
 	ctl.end_round()
 
 

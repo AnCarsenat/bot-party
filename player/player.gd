@@ -50,6 +50,17 @@ var _carry_vx := 0.0
 var actual_velocity := Vector2.ZERO
 ## Sideways push from the arena (wind). Added to where we're trying to go.
 var wind_vx := 0.0
+## Effects on the robot (party traps): name -> seconds left. The host runs them;
+## online clients only show them.
+##   stuck     can't move or jump (bear trap)
+##   slippery  hardly any grip (spitter, ice)
+##   slowed    half speed, lower jumps (glue)
+##   floating  drifts up slowly (balloon)
+var statuses := {}
+const STATUSES := ["stuck", "slippery", "slowed", "floating"]
+## A pull towards something (magnets): a speed added this physics frame.
+var _pull := Vector2.ZERO
+var _pull_frame := -10
 var _prev_position := Vector2.INF
 
 @onready var _sprite: Sprite2D = $Sprite2D
@@ -100,7 +111,7 @@ var _net_target := Vector2.INF
 func net_state() -> Array:
 	return [Vector2i(global_position.round()), _sprite.frame, _face.frame, _sprite.flip_h,
 		_sprite.scale, visible, get_meta("eliminated", false), get_meta("finished", false),
-		get_meta("coin", false), snappedf(modulate.a, 0.05)]
+		get_meta("coin", false), snappedf(modulate.a, 0.05), [] if get_meta("eliminated", false) else statuses.keys()]
 
 
 func net_apply(s: Array) -> void:
@@ -118,6 +129,10 @@ func net_apply(s: Array) -> void:
 	set_meta("finished", s[7])
 	set_meta("coin", s[8])
 	modulate.a = s[9]
+	if s.size() > 10:
+		statuses.clear()
+		for k in s[10]:
+			statuses[k] = 1.0  # shown only: the host keeps the time
 	if s[6] and not get_meta("eliminated", false):
 		var scene := get_tree().current_scene
 		var game := scene.get_node_or_null("Game") if scene else null
@@ -155,7 +170,40 @@ func set_ghostly(value: bool) -> void:
 		collision_mask |= Layers.PLAYERS
 
 
+# --- Statuses -------------------------------------------------------------------
+
+## Puts an effect on the robot for `seconds` (or longer, if it already has it).
+func add_status(status: String, seconds: float) -> void:
+	if get_meta("eliminated", false) or get_meta("finished", false) or get_meta("god", false):
+		return
+	statuses[status] = maxf(float(statuses.get(status, 0.0)), seconds)
+
+
+func has_status(status: String) -> bool:
+	if get_meta("eliminated", false) and not statuses.is_empty():
+		statuses.clear()  # out of the round: no more effects
+	return statuses.has(status)
+
+
+## Pulled towards something (a magnet), for this physics frame.
+func pull(v: Vector2) -> void:
+	if _pull_frame != Engine.get_physics_frames():
+		_pull = Vector2.ZERO
+		_pull_frame = Engine.get_physics_frames()
+	_pull += v
+
+
+func _tick_statuses(delta: float) -> void:
+	if get_meta("eliminated", false):
+		statuses.clear()
+	for k in statuses.keys():
+		statuses[k] -= delta
+		if statuses[k] <= 0.0:
+			statuses.erase(k)
+
+
 func _physics_process(delta: float) -> void:
+	_tick_statuses(delta)
 	if _prev_position != Vector2.INF and delta > 0.0:
 		actual_velocity = (global_position - _prev_position) / delta
 	_prev_position = global_position
@@ -178,11 +226,18 @@ func platformer_movement(delta: float) -> void:
 	if get_meta("noclip", false):
 		_noclip_movement(delta)
 		return
-	if not is_on_floor():
+	var stuck := has_status("stuck")
+	var slowed := has_status("slowed")
+	if has_status("floating"):
+		velocity.y = move_toward(velocity.y, -170.0, 2400.0 * delta)
+	elif not is_on_floor():
 		var g := gravity * (fall_gravity_multiplier if velocity.y > 0.0 else 1.0)
 		velocity.y = minf(velocity.y + g * delta, max_fall_speed)
 	elif velocity.y > 0.0:
 		velocity.y = 0.0
+	var pulled := _pull if _pull_frame >= Engine.get_physics_frames() - 1 else Vector2.ZERO
+	if pulled.y != 0.0:
+		velocity.y += pulled.y * delta * 4.0
 
 	# Coyote time: refill while grounded, count down once airborne.
 	# Standing on another player only counts if that player is grounded too,
@@ -200,8 +255,8 @@ func platformer_movement(delta: float) -> void:
 	else:
 		jump_buffer_timer -= delta
 
-	if jump_buffer_timer > 0.0 and coyote_timer > 0.0:
-		velocity.y = jump_speed
+	if jump_buffer_timer > 0.0 and coyote_timer > 0.0 and not stuck:
+		velocity.y = jump_speed * (0.75 if slowed else 1.0)
 		if is_instance_valid(_last_below) and player_below() == _last_below:
 			_carry_vx = _last_below.actual_velocity.x
 		jump_buffer_timer = 0.0
@@ -218,13 +273,20 @@ func platformer_movement(delta: float) -> void:
 		input_prefix + "_move_left",
 		input_prefix + "_move_right"
 	)
+	if stuck:
+		direction = 0.0
 	if is_on_floor() and player_below() == null:
 		_carry_vx = 0.0
 	elif not is_on_floor():
 		_carry_vx = move_toward(_carry_vx, 0.0, carry_momentum_decay * delta)
 	var accel := ground_accel if is_on_floor() else air_accel
-	var target := direction * speed + (0.0 if is_on_floor() else _carry_vx) + wind_vx
-	velocity.x = move_toward(velocity.x, target, accel * delta)
+	if has_status("slippery"):
+		accel *= 0.07 if is_on_floor() else 0.35  # on ice: hard to start, harder to stop
+	var target := direction * speed * (0.5 if slowed else 1.0) + (0.0 if is_on_floor() else _carry_vx) + wind_vx + pulled.x
+	if stuck:
+		velocity.x = 0.0
+	else:
+		velocity.x = move_toward(velocity.x, target, accel * delta)
 
 	var below := player_below()
 	if below != null:

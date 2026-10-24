@@ -76,9 +76,8 @@ func _run() -> void:
 		for s in n:
 			gs.joined.append(s + 1)
 	if o.has("bots") and o.bots.is_valid_int():
-		party.bot_count = clampi(int(o.bots), 0, gs.MAX_PLAYERS - 1)
-	if o.has("bot-skill"):
-		party.bot_skill = maxi(0, ["easy", "normal", "hard"].find(o["bot-skill"].to_lower()))
+		var skill := maxi(0, ["easy", "normal", "hard"].find(str(o.get("bot-skill", "normal")).to_lower()))
+		party.set_bots(int(o.bots), skill)
 	if o.has("arena"):
 		party.arena_choice = _arena(o.arena)
 	if o.has("state"):
