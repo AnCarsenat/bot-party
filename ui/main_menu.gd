@@ -238,19 +238,15 @@ func _show(screen: String, keep_index := false) -> void:
 				Party.rules = Party.RULE_DEFAULTS.duplicate(); Party.save_weights(); _show("party_rules", true)})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"party_items":
-			# The usual items first, then the special ones (from Special crates).
-			var ids: Array = Party.listed_items().filter(func(k): return not Party.is_special(k)) \
-				+ Party.listed_items().filter(func(k): return Party.is_special(k))
-			for id in ids:
-				var def: Dictionary = Party.ITEMS[id]
-				var info := "Left / right: how often\nJump: on / off"
-				if Party.is_special(id):
-					info = "Special: comes out of Special crates (Party > Rules > Specials).\n" + info
-				_items.append({"text": def.name, "icon": Party.icon(id), "size": 34, "info": info,
-					"value": func(): return _item_value(id),
-					"on_left": func(): _set_item_weight(id, Party.weight(id) - 1),
-					"on_right": func(): _set_item_weight(id, Party.weight(id) + 1),
-					"on_accept": func(): _set_item_weight(id, 0 if Party.weight(id) > 0 else int(def.get("weight", 10)))})
+			# Two groups: the usual items (the % is their share of the box), then the
+			# special ones (their share of what Special crates give).
+			for group in [false, true]:
+				var ids: Array = Party.listed_items().filter(func(k): return Party.is_special(k) == group)
+				if ids.is_empty():
+					continue
+				_items.append({"text": "Special items" if group else "Items", "enabled": false, "size": 26, "heading": true})
+				for id in ids:
+					_items.append(_item_row(id))
 			_items.append({"text": "Reset", "on_accept": func(): Party.reset_weights(); _refresh_info(), "info": "Back to the default odds."})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"players":
@@ -324,6 +320,10 @@ func _show(screen: String, keep_index := false) -> void:
 				{"text": "Controls", "on_accept": func(): _show("controls"), "info": "Change the keys of each player."},
 				{"text": "Mods", "on_accept": func(): _show("mods"), "info": "Items, maps and textures made by players.",
 					"enabled": not Net.is_online()},
+				{"text": "Data folder", "on_accept": func(): _open_folder(OS.get_user_data_dir()),
+					"info": "Your saves, settings, maps and mods:\n%s" % OS.get_user_data_dir()},
+				{"text": "Game folder", "on_accept": func(): _open_folder(_game_folder()),
+					"info": "Where the game itself is:\n%s" % _game_folder()},
 				{"text": "Back", "on_accept": func(): _back()},
 			]
 		"controls":
@@ -459,6 +459,35 @@ func _refresh_arena_preview() -> void:
 		_arena_preview.set_choice(Party.arena_choice)
 		_machine.visible = false
 		_info.offset_top = 420
+
+
+## Party > Items: one item's row.
+func _item_row(id: String) -> Dictionary:
+	var def: Dictionary = Party.ITEMS[id]
+	var info := "Left / right: how often\nJump: on / off"
+	if Party.is_special(id):
+		info = "Only comes out of Special crates.\nThe % is its share of them.\n" + info
+	else:
+		info = "The % is its share of the box.\n" + info
+	return {"text": def.name, "icon": Party.icon(id), "size": 34, "info": info,
+		"value": func(): return _item_value(id),
+		"on_left": func(): _set_item_weight(id, Party.weight(id) - 1),
+		"on_right": func(): _set_item_weight(id, Party.weight(id) + 1),
+		"on_accept": func(): _set_item_weight(id, 0 if Party.weight(id) > 0 else int(def.get("weight", 10)))}
+
+
+## Settings > Data folder / Game folder.
+func _open_folder(path: String) -> void:
+	DirAccess.make_dir_recursive_absolute(path)
+	OS.shell_open(path)
+	_hint.text = "Opened " + path
+
+
+## The installed game's folder (or the project's, when run from Godot).
+func _game_folder() -> String:
+	if OS.has_feature("editor"):
+		return ProjectSettings.globalize_path("res://")
+	return OS.get_executable_path().get_base_dir()
 
 
 ## Party > Items row value: chance in % (or Off) plus a bar for the weight.
@@ -875,6 +904,11 @@ class _Row extends Control:
 		if index >= menu._items.size():
 			return  # a row of the screen we just left, about to go
 		var item: Dictionary = menu._items[index]
+		if item.get("heading", false):
+			# A section title (Party > Items): no button, a line under it.
+			draw_string(UiTheme.FONT_BOLD, Vector2(4, 44), item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, UiTheme.ACCENT)
+			draw_line(Vector2(4, 54), Vector2(size.x - 20, 54), UiTheme.ACCENT, 3.0)
+			return
 		var selected: bool = index == menu._index
 		var enabled: bool = item.get("enabled", true)
 		# Button: the cap sinks when selected, a bit more when chosen.
