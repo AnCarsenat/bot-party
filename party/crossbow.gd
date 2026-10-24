@@ -47,6 +47,11 @@ func bolt_end(_space = null) -> Vector2:
 	return Hazard.path_end(self, muzzle(), forward(), bolt_speed * bolt_life, BOLT_STOPPERS)
 
 
+## Seconds until the next shot (bots plan with it).
+func next_shot() -> float:
+	return maxf(0.0, interval - _t)
+
+
 func reset_round() -> void:
 	_t = 0.0
 

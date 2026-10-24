@@ -17,7 +17,8 @@ or against bots.
   Reach the flag where the others can't, and score with the traps you placed.
   Now and then a **Special crate** turns up with one of 14 special items: bear
   traps, punching gloves, magnets, balloons, a hydrogen bomb, a black hole...
-  Rules, game modes and item odds can all be changed.
+  Every box has at least one item that helps and one trap. Rules, game modes and
+  item odds can all be changed.
 - **Online:** host a game for your friends, or find one on the server list.
   Several people can play on each computer.
 - **Bots** to play against, from easy to hard.

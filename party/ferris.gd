@@ -56,6 +56,14 @@ func mounts() -> Array[ItemMount]:
 	return _mounts
 
 
+## How far attachment point `m` will have moved `t` seconds from now (bots plan
+## with it: what hangs there goes round).
+func mount_moved_by(m: ItemMount, t: float) -> Vector2:
+	var i := _mounts.find(m)
+	var a := _angle + spin * t * (-1.0 if mirrored else 1.0) + TAU * i / _cars.size() + PI / _cars.size()
+	return global_transform.basis_xform(Vector2(cos(a), sin(a)) * radius - m.position)
+
+
 func reset_round() -> void:
 	_angle = 0.0
 	_place_cars()

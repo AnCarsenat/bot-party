@@ -21,6 +21,12 @@ func _physics_process(delta: float) -> void:
 	_sprite.rotation += spin_speed * delta
 
 
+## How far the blade will have moved `t` seconds from now (bots plan with it).
+func moved_by(t: float) -> Vector2:
+	var x := sin((_t + t) / period * TAU) * travel
+	return global_transform.basis_xform(Vector2(x - _blade.position.x, 0))
+
+
 func reset_round() -> void:
 	_t = 0.0
 	_blade.position.x = 0.0

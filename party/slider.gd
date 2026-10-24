@@ -36,6 +36,11 @@ func _place() -> void:
 	queue_redraw()
 
 
+## How far the attachment point will have moved `t` seconds from now (bots).
+func mount_moved_by(m: ItemMount, t: float) -> Vector2:
+	return global_transform.basis_xform(Vector2(sin((_t + t) / period * TAU) * travel, 0) - m.position)
+
+
 func reset_round() -> void:
 	_t = 0.0
 	_place()

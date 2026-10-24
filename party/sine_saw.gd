@@ -29,6 +29,11 @@ func path_at(t: float) -> Vector2:
 	return Vector2(x, _wave(x))
 
 
+## How far the blade will have moved `t` seconds from now (bots plan with it).
+func moved_by(t: float) -> Vector2:
+	return global_transform.basis_xform(path_at(_t + t) - _blade.position)
+
+
 func _wave(x: float) -> float:
 	return -sin(PI * waves * (x + travel) / (2.0 * travel)) * amplitude
 

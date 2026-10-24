@@ -70,7 +70,9 @@ var _phase := -1
 static var _shared := {}
 var _plan: Array = []      # per frame: [dir, jump held]
 var _commit := 0
-var _dangers: Array = []   # [Rect2 now, Vector2 velocity, trap that switches on and off or null]
+var _dangers: Array = []   # [Rect2 now, Vector2 velocity, trap that switches on and off or null,
+                           #  track or null, how it moves: [item, host, mount] or null]
+var _shooters: Array = []  # crossbows: [muzzle, bolt velocity, next shot in, interval, bolt flight time, size]
 var _dangers_age := 99
 var _fans: Array = []      # [Rect2, push direction, strength, max speed]
 var _pads: Array = []      # trampolines: [Rect2, up direction, bounce speed]
@@ -322,12 +324,15 @@ func _choose_spot(id: String) -> Vector2:
 		var gap := _gap_on(route)
 		if gap != Vector2.INF and ctl.can_place(id, gap, turn):
 			return gap
-	for attempt in 40:
+	var best := Vector2.INF
+	var best_score := -1.0
+	var tried := 0
+	for attempt in 60:
 		var pos: Vector2
 		if style == "chaos" and attempt < 20:
 			var area: Rect2 = ctl.build_area
 			pos = Vector2(_rng.randf_range(area.position.x, area.end.x), _rng.randf_range(area.position.y, area.end.y))
-		elif not route.is_empty() and attempt < 30:
+		elif not route.is_empty() and attempt < 50:
 			var k := int(route.size() * _rng.randf_range(span.x, span.y))
 			pos = route[k]
 			if id in TRAPS or _rng.randf() < 0.6:
@@ -340,8 +345,29 @@ func _choose_spot(id: String) -> Vector2:
 			var area: Rect2 = ctl.build_area
 			pos = Vector2(_rng.randf_range(area.position.x, area.end.x), _rng.randf_range(area.position.y, area.end.y))
 		if ctl.can_place(id, pos, turn):
-			return pos
-	return ctl.cursor[slot]
+			# Traps: better bots try more spots and keep the one that covers most
+			# of the way the racers go.
+			if not id in TRAPS or route.is_empty() or skill == Skill.EASY:
+				return pos
+			var score := _coverage(id, pos, turn, route) + _rng.randf() * 0.5
+			if score > best_score:
+				best_score = score
+				best = pos
+			tried += 1
+			if tried >= [1, 6, 24][skill]:
+				break
+	return best if best != Vector2.INF else ctl.cursor[slot]
+
+
+## How much of the route a trap at `pos` sits on (route points inside its
+## footprint, a little grown: the robot's body is big).
+func _coverage(id: String, pos: Vector2, turn: int, route: Array) -> float:
+	var r: Rect2 = ctl._footprint(id, pos, turn).grow(36)
+	var n := 0.0
+	for p in route:
+		if r.has_point(p):
+			n += 1.0
+	return n
 
 
 ## Builders: a spot on the way with nothing to stand on below (a gap to fill),
@@ -442,6 +468,8 @@ func _make_plan(p: Node) -> void:
 		_dangers = _find_dangers(p)
 		_find_pushers()
 		_dangers_age = 0
+	else:
+		_refresh_dangers()
 	_dangers_age += 1
 	var scored := []
 	for plan in _candidates(p):
@@ -624,10 +652,23 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 			airborne = true
 		for d in _dangers:
 			# Where that trap or bolt will be by then.
-			if d[2] != null and is_instance_valid(d[2]) and not d[2].firing_in(i / 60.0 + [0.0, 0.1, 0.15][skill]):
-				continue
+			if d[2] != null and is_instance_valid(d[2]):
+				# On and off traps (flamethrowers): out if it's on at any time close to then.
+				var t := i / 60.0
+				var lag: float = [0.0, 0.1, 0.15][skill]
+				if not (d[2].firing_in(t) or d[2].firing_in(t + lag) or d[2].firing_in(maxf(0.0, t - lag))):
+					continue
 			if _moved(d, i / 60.0).has_point(pos):
 				return {"pos": pos, "dead": true, "floor": on_floor, "frames": stop_at, "at": i}
+		# Bolts crossbows haven't shot yet.
+		for s in _shooters:
+			var t := i / 60.0
+			for k in 3:
+				var since: float = t - (s[2] + k * s[3])
+				if since < 0.0:
+					break
+				if since <= s[4] and Rect2(s[0] + s[1] * since, Vector2.ZERO).grow_individual(s[5].x, s[5].y, s[5].x, s[5].y).has_point(pos):
+					return {"pos": pos, "dead": true, "floor": on_floor, "frames": stop_at, "at": i}
 		if cam and cam.has_method("is_out_of_bounds") and cam.is_out_of_bounds(pos):
 			return {"pos": pos, "dead": true, "floor": false, "frames": stop_at, "at": i}
 		if airborne and on_floor and not floor_was and i > 6 and i < stop_at:
@@ -640,9 +681,30 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 	return {"pos": pos, "dead": false, "floor": on_floor, "frames": stop_at, "crumble": on_crumble and on_floor}
 
 
+## Traps where they are now (the list is only made again every few plans; the
+## predictions start from now).
+func _refresh_dangers() -> void:
+	for d in _dangers:
+		if d.size() > 6 and is_instance_valid(d[5]) and d[5].is_inside_tree() and d[5].shape:
+			var g: Vector2 = d[6]
+			d[0] = (d[5].global_transform * d[5].shape.get_rect()).grow_individual(g.x, g.y, g.x, g.y)
+	for s in _shooters:
+		s[2] -= (Engine.get_physics_frames() - int(s[6])) / 60.0
+		s[6] = Engine.get_physics_frames()
+
+
 ## Where a danger will be `t` seconds from now (bouncing back and forth on its track).
 func _moved(d: Array, t: float) -> Rect2:
 	var r: Rect2 = d[0]
+	if d.size() > 4 and d[4] != null:
+		# A trap that can say where it'll be (saws, things on a pendulum or a wheel).
+		var off := Vector2.ZERO
+		var how: Array = d[4]
+		if how[0] != null and is_instance_valid(how[0]):
+			off += how[0].moved_by(t)
+		if how[1] != null and is_instance_valid(how[1]) and is_instance_valid(how[2]):
+			off += how[1].mount_moved_by(how[2], t)
+		return Rect2(r.position + off, r.size)
 	var v: Vector2 = d[1]
 	if v == Vector2.ZERO:
 		return r
@@ -723,13 +785,37 @@ func _find_dangers(p: Node) -> Array:
 				if item and v != Vector2.ZERO and not item.get_meta("record", {}).has("host"):
 					var rec: Dictionary = item.get_meta("record")
 					track = ctl._footprint(rec.id, Vector2(rec.x, rec.y), int(rec.get("rot", 0)))
+				# Better: traps that can say where they'll be.
+				var how = null
+				if item:
+					var mover = item if item.has_method("moved_by") else null
+					var mount = item.get_parent() if item.get_parent() is ItemMount else null
+					var host = mount.get_parent() if mount and mount.get_parent().has_method("mount_moved_by") else null
+					if mover or host:
+						how = [mover, host, mount]
 				out.append([r.grow_individual(half.x + margin, half.y + margin, half.x + margin, half.y + margin), v, timed,
-					track.grow_individual(half.x + margin, half.y + margin, half.x + margin, half.y + margin) if track else null])
-		# Mines blow up around them.
+					track.grow_individual(half.x + margin, half.y + margin, half.x + margin, half.y + margin) if track else null, how,
+					c, half + Vector2(margin, margin)])
+		# Mines: touching the trigger is out (that's the hazard above). The blast
+		# only matters when someone else is close enough to set it off.
 		var blast = h.get_parent().get("radius") if h.get_parent() else null
-		if blast is float and h.get_parent().has_method("_on_touch"):
+		if blast is float and h.get_parent().has_method("_on_touch") and h.monitoring:
 			var c: Vector2 = h.get_parent().global_position
-			out.append([Rect2(c, Vector2.ZERO).grow(blast + margin), Vector2.ZERO, null, null])
+			var others := false
+			for o in ctl.players.values():
+				if is_instance_valid(o) and o != p and not o.get_meta("eliminated", false) and not o.get_meta("finished", false) \
+						and o.global_position.distance_to(c) < blast + 120.0:
+					others = true
+			if others:
+				out.append([Rect2(c, Vector2.ZERO).grow(blast + margin), Vector2.ZERO, null, null])
+	# Crossbows: the bolts they're going to shoot.
+	_shooters.clear()
+	for n in ctl.get_parent().find_children("*", "Node2D", true, false):
+		if n.has_method("next_shot") and n.has_method("bolt_end") and n.has_meta("record"):
+			var from: Vector2 = n.muzzle()
+			var flight: float = from.distance_to(n.bolt_end()) / n.bolt_speed
+			_shooters.append([from, n.forward() * n.bolt_speed, n.next_shot(), n.interval, flight,
+				half + Vector2(15 + margin, 4 + margin), Engine.get_physics_frames()])
 	for b in get_tree().get_nodes_in_group("bolts"):
 		if b is Node2D:
 			var v = b.get("velocity")

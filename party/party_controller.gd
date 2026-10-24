@@ -552,15 +552,26 @@ func _start_pick() -> void:
 		if Party.ITEMS[k].get("bomb", false):
 			bomb_ids.append(k)
 	# At most one bomb (or nuke) per box, and none while there's nothing to blow up.
+	# No item more than twice.
 	var no_bombs: bool = Party.session.items.is_empty()
-	while box.size() < count:
-		var id: String = Party.pick_item(_rng, bomb_ids if no_bombs else [])
+	for tries in 100:
+		if box.size() >= count:
+			break
+		var skip: Array = bomb_ids.duplicate() if no_bombs else []
+		for k in box:
+			if box.count(k) >= 2:
+				skip.append(k)
+		var id: String = Party.pick_item(_rng, skip)
 		if id in bomb_ids:
 			no_bombs = true
 		# Now and then a Special crate instead (Party > Rules > Specials).
 		if _rng.randf() < Party.special_odds() and Party.pick_special(_rng) != "":
 			id = "special"
 		box.append(id)
+	# Something to help you along and something to trip the others up, every time.
+	if box.size() >= 3:
+		_ensure_kind("help")
+		_ensure_kind("trap")
 	_overview()
 	cursors.clear()
 	picks.clear()
@@ -569,6 +580,28 @@ func _start_pick() -> void:
 	_box_row.show()
 	_scoreboard.hide()
 	_update_box()
+
+
+## If no card in the box is of `kind` ("help" or "trap"), one card becomes one.
+func _ensure_kind(kind: String) -> void:
+	var kinds := box.map(func(id): return "card" if id == "special" else Party.ITEMS.get(id, {}).get("kind", ""))
+	if kind in kinds or "" in kinds:  # (mod items: unknown, left alone)
+		return
+	var others: Array = Party.listed_items().filter(func(k): return Party.ITEMS[k].get("kind", "") != kind)
+	var id := Party.pick_item(_rng, others)
+	if Party.ITEMS.get(id, {}).get("kind", "") != kind:
+		return  # all of that kind are switched off
+	# Replace a card whose kind the box has plenty of, or else a bomb (never a
+	# Special crate, nor the only helpful item or trap).
+	var best := -1
+	for i in box.size():
+		if box[i] == "special":
+			continue
+		var plenty: bool = kinds.count(kinds[i]) >= 2 or kinds[i] == "bomb"
+		if plenty and (best < 0 or kinds.count(kinds[i]) > kinds.count(kinds[best])):
+			best = i
+	if best >= 0:
+		box[best] = id
 
 
 func _start_place() -> void:

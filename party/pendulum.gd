@@ -50,6 +50,14 @@ func angle() -> float:
 	return sin(_t / period * TAU) * swing * (-1.0 if mirrored else 1.0)
 
 
+## How far attachment point `m` will have moved `t` seconds from now (bots plan
+## with it: what hangs there swings along).
+func mount_moved_by(m: ItemMount, t: float) -> Vector2:
+	var a := sin((_t + t) / period * TAU) * swing * (-1.0 if mirrored else 1.0)
+	var k := 0.5 if _mounts.find(m) == 0 else 1.0
+	return global_transform.basis_xform(Vector2(0, length * k).rotated(a) - m.position)
+
+
 func reset_round() -> void:
 	_t = 0.0
 	_place()

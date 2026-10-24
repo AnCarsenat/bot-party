@@ -7,7 +7,7 @@ const TARGET_SCORE := 50  # default "First to" score (see rules)
 ## Party rules (Party > Rules). Each party keeps the rules it started with.
 const RULE_DEFAULTS := {"target": 50, "round_time": 0, "coins": true, "surprises": true, "equal_odds": false, "mode": "classic", "specials": 1}
 ## Chance that a card in the box is a Special crate, for the "specials" rule (off, rare, often).
-const SPECIAL_ODDS := [0.0, 0.02, 0.08]
+const SPECIAL_ODDS := [0.0, 0.04, 0.12]
 const SPECIAL_NAMES := ["Off", "Rare", "Often"]
 var rules := RULE_DEFAULTS.duplicate()
 const SAVE_PATH := "user://party_session.json"
@@ -23,43 +23,45 @@ const POINTS_TRAP := 2
 ## Everything a player can pick. size/offset describe the item's footprint
 ## (used to stop building in the start and goal areas). weight: how often it
 ## shows up in the box by default (players can change it in Party > Items).
+## kind: "help" (gets you to the flag), "trap" or "bomb". Every box has at least
+## one helpful item and one trap.
 const BUILT_IN_ITEMS := {
-	"block": {"name": "Block", "scene": "res://party/items/block.tscn", "icon": "res://party/art/block.webp", "size": Vector2(64, 64), "weight": 10},
-	"plank": {"name": "Plank", "scene": "res://objects/platform.tscn", "icon": "res://objects/toggle_platform_enabled.webp", "size": Vector2(192, 30), "props": {"size": Vector2(192, 30), "one_way": true}, "weight": 10},
-	"spikes": {"name": "Spikes", "scene": "res://party/items/spikes.tscn", "icon": "res://party/art/spikes.webp", "size": Vector2(64, 28), "weight": 10},
-	"saw": {"name": "Saw", "scene": "res://party/items/saw.tscn", "icon": "res://party/art/saw.webp", "size": Vector2(240, 64), "weight": 10},
-	"trampoline": {"name": "Trampoline", "scene": "res://objects/trampoline.tscn", "icon": "res://objects/trampoline.webp", "size": Vector2(80, 40), "offset": Vector2(0, -20), "weight": 10},
-	"crossbow": {"name": "Crossbow", "scene": "res://party/items/crossbow.tscn", "icon": "res://party/art/crossbow.webp", "size": Vector2(64, 64), "weight": 10},
-	"planes": {"name": "Plane launcher", "scene": "res://party/items/plane_launcher.tscn", "icon": "res://party/art/plane_launcher.webp", "size": Vector2(64, 56), "offset": Vector2(0, 4), "weight": 7},
-	"crumble": {"name": "Crumbling block", "scene": "res://party/items/crumble.tscn", "icon": "res://party/art/crumble.webp", "size": Vector2(96, 28), "weight": 8},
-	"conveyor": {"name": "Conveyor", "scene": "res://party/items/conveyor.tscn", "icon": "res://party/art/conveyor.webp", "size": Vector2(96, 28), "weight": 8},
-	"mine": {"name": "Mine", "scene": "res://party/items/mine.tscn", "icon": "res://party/art/landmine.webp", "size": Vector2(64, 24), "weight": 8},
-	"fan": {"name": "Fan", "scene": "res://party/items/fan.tscn", "icon": "res://party/art/fan.webp", "size": Vector2(64, 270), "offset": Vector2(0, -120), "weight": 8},
+	"block": {"name": "Block", "scene": "res://party/items/block.tscn", "icon": "res://party/art/block.webp", "size": Vector2(64, 64), "weight": 8, "kind": "help"},
+	"plank": {"name": "Plank", "scene": "res://objects/platform.tscn", "icon": "res://objects/toggle_platform_enabled.webp", "size": Vector2(192, 30), "props": {"size": Vector2(192, 30), "one_way": true}, "weight": 9, "kind": "help"},
+	"spikes": {"name": "Spikes", "scene": "res://party/items/spikes.tscn", "icon": "res://party/art/spikes.webp", "size": Vector2(64, 28), "weight": 9, "kind": "trap"},
+	"saw": {"name": "Saw", "scene": "res://party/items/saw.tscn", "icon": "res://party/art/saw.webp", "size": Vector2(240, 64), "weight": 9, "kind": "trap"},
+	"trampoline": {"name": "Trampoline", "scene": "res://objects/trampoline.tscn", "icon": "res://objects/trampoline.webp", "size": Vector2(80, 40), "offset": Vector2(0, -20), "weight": 8, "kind": "help"},
+	"crossbow": {"name": "Crossbow", "scene": "res://party/items/crossbow.tscn", "icon": "res://party/art/crossbow.webp", "size": Vector2(64, 64), "weight": 8, "kind": "trap"},
+	"planes": {"name": "Plane launcher", "scene": "res://party/items/plane_launcher.tscn", "icon": "res://party/art/plane_launcher.webp", "size": Vector2(64, 56), "offset": Vector2(0, 4), "weight": 5, "kind": "help"},
+	"crumble": {"name": "Crumbling block", "scene": "res://party/items/crumble.tscn", "icon": "res://party/art/crumble.webp", "size": Vector2(96, 28), "weight": 6, "kind": "trap"},
+	"conveyor": {"name": "Conveyor", "scene": "res://party/items/conveyor.tscn", "icon": "res://party/art/conveyor.webp", "size": Vector2(96, 28), "weight": 6, "kind": "help"},
+	"mine": {"name": "Mine", "scene": "res://party/items/mine.tscn", "icon": "res://party/art/landmine.webp", "size": Vector2(64, 24), "weight": 7, "kind": "trap"},
+	"fan": {"name": "Fan", "scene": "res://party/items/fan.tscn", "icon": "res://party/art/fan.webp", "size": Vector2(64, 270), "offset": Vector2(0, -120), "weight": 5, "kind": "help"},
 	"lift": {"name": "Lift", "scene": "res://objects/platform.tscn", "icon": "res://party/art/lift.webp", "size": Vector2(128, 250), "offset": Vector2(0, -110),
-		"props": {"size": Vector2(128, 24), "move_offset": Vector2(0, -220), "move_time": 1.6, "pause_time": 0.4}, "weight": 8},
-	"ferris": {"name": "Ferris wheel", "host": true, "scene": "res://party/items/ferris.tscn", "icon": "res://party/art/ferris.webp", "size": Vector2(360, 380), "offset": Vector2(0, 28), "weight": 5},
-	"slider": {"name": "Slider", "scene": "res://party/items/slider.tscn", "icon": "res://party/art/slider.webp", "size": Vector2(220, 40), "host": true, "weight": 7},
-	"pendulum": {"name": "Pendulum", "host": true, "scene": "res://party/items/pendulum.tscn", "icon": "res://party/art/pendulum.webp", "size": Vector2(350, 220), "offset": Vector2(0, 95), "weight": 6},
-	"flamer": {"name": "Flamethrower", "scene": "res://party/items/flamer.tscn", "icon": "res://party/art/flamer.webp", "size": Vector2(64, 236), "offset": Vector2(0, -86), "weight": 6},
-	"bomb": {"name": "Bomb", "bomb": true, "radius": 130.0, "icon": "res://party/art/bomb.webp", "size": Vector2(64, 64), "weight": 6},
-	"nuke": {"name": "Nuke", "bomb": true, "radius": 260.0, "icon": "res://party/art/nuke.webp", "size": Vector2(64, 64), "weight": 1},
+		"props": {"size": Vector2(128, 24), "move_offset": Vector2(0, -220), "move_time": 1.6, "pause_time": 0.4}, "weight": 6, "kind": "help"},
+	"ferris": {"name": "Ferris wheel", "host": true, "scene": "res://party/items/ferris.tscn", "icon": "res://party/art/ferris.webp", "size": Vector2(360, 380), "offset": Vector2(0, 28), "weight": 4, "kind": "help"},
+	"slider": {"name": "Slider", "scene": "res://party/items/slider.tscn", "icon": "res://party/art/slider.webp", "size": Vector2(220, 40), "host": true, "weight": 5, "kind": "help"},
+	"pendulum": {"name": "Pendulum", "host": true, "scene": "res://party/items/pendulum.tscn", "icon": "res://party/art/pendulum.webp", "size": Vector2(350, 220), "offset": Vector2(0, 95), "weight": 6, "kind": "trap"},
+	"flamer": {"name": "Flamethrower", "scene": "res://party/items/flamer.tscn", "icon": "res://party/art/flamer.webp", "size": Vector2(64, 236), "offset": Vector2(0, -86), "weight": 6, "kind": "trap"},
+	"bomb": {"name": "Bomb", "bomb": true, "radius": 130.0, "icon": "res://party/art/bomb.webp", "size": Vector2(64, 64), "weight": 5, "kind": "bomb"},
+	"nuke": {"name": "Nuke", "bomb": true, "radius": 260.0, "icon": "res://party/art/nuke.webp", "size": Vector2(64, 64), "weight": 2, "kind": "bomb"},
 	# Special items: never in the box themselves. A Special crate card (rare) gives
 	# one of them, picked with these weights.
 	"big_ferris": {"name": "Big ferris wheel", "special": true, "host": true, "scene": "res://party/items/ferris.tscn", "icon": "res://party/art/big_ferris.webp",
-		"props": {"radius": 240.0, "gondolas": 9, "spin": 0.32}, "size": Vector2(540, 580), "offset": Vector2(0, 30), "weight": 6},
-	"follower": {"name": "Follower", "special": true, "host": true, "scene": "res://party/items/follower.tscn", "icon": "res://party/art/follower.webp", "size": Vector2(64, 80), "offset": Vector2(0, 4), "weight": 6},
-	"sine_saw": {"name": "Sine saw", "special": true, "scene": "res://party/items/sine_saw.tscn", "icon": "res://party/art/sine_saw.webp", "size": Vector2(404, 196), "weight": 8},
-	"h_bomb": {"name": "Hydrogen bomb", "special": true, "bomb": true, "radius": 450.0, "icon": "res://party/art/h_bomb.webp", "size": Vector2(64, 64), "weight": 4},
-	"bear_trap": {"name": "Bear trap", "special": true, "scene": "res://party/items/bear_trap.tscn", "icon": "res://party/art/bear_trap.webp", "size": Vector2(64, 44), "offset": Vector2(0, 6), "weight": 8},
-	"glove": {"name": "Punching glove", "special": true, "scene": "res://party/items/glove.tscn", "icon": "res://party/art/glove.webp", "size": Vector2(64, 64), "weight": 7},
-	"spitter": {"name": "Spitter", "special": true, "scene": "res://party/items/spitter.tscn", "icon": "res://party/art/spitter.webp", "size": Vector2(64, 236), "offset": Vector2(0, -86), "weight": 7},
-	"special_crate": {"name": "Special crate", "special": true, "scene": "res://party/items/special_crate.tscn", "icon": "res://party/art/special_crate.webp", "size": Vector2(64, 64), "weight": 5},
-	"magnet": {"name": "Magnet", "special": true, "scene": "res://party/items/magnet.tscn", "icon": "res://party/art/magnet.webp", "size": Vector2(64, 64), "weight": 6},
-	"ice_block": {"name": "Ice block", "special": true, "scene": "res://party/items/ice_block.tscn", "icon": "res://party/art/ice_block.webp", "size": Vector2(64, 64), "weight": 7},
-	"glue_pad": {"name": "Glue pad", "special": true, "scene": "res://party/items/glue_pad.tscn", "icon": "res://party/art/glue_pad.webp", "size": Vector2(64, 36), "offset": Vector2(0, 12), "weight": 7},
-	"alt_plank": {"name": "Alternating plank", "special": true, "scene": "res://party/items/alt_plank.tscn", "icon": "res://party/art/alt_plank.webp", "size": Vector2(192, 30), "weight": 7},
-	"balloon": {"name": "Balloon", "special": true, "scene": "res://party/items/balloon.tscn", "icon": "res://party/art/balloon.webp", "size": Vector2(48, 64), "weight": 6},
-	"black_hole": {"name": "Black hole", "special": true, "bomb": true, "black_hole": true, "radius": 300.0, "icon": "res://party/art/black_hole.webp", "size": Vector2(64, 64), "weight": 5},
+		"props": {"radius": 240.0, "gondolas": 9, "spin": 0.32}, "size": Vector2(540, 580), "offset": Vector2(0, 30), "weight": 4, "kind": "help"},
+	"follower": {"name": "Follower", "special": true, "host": true, "scene": "res://party/items/follower.tscn", "icon": "res://party/art/follower.webp", "size": Vector2(64, 80), "offset": Vector2(0, 4), "weight": 5, "kind": "help"},
+	"sine_saw": {"name": "Sine saw", "special": true, "scene": "res://party/items/sine_saw.tscn", "icon": "res://party/art/sine_saw.webp", "size": Vector2(404, 196), "weight": 7, "kind": "trap"},
+	"h_bomb": {"name": "Hydrogen bomb", "special": true, "bomb": true, "radius": 450.0, "icon": "res://party/art/h_bomb.webp", "size": Vector2(64, 64), "weight": 3, "kind": "bomb"},
+	"bear_trap": {"name": "Bear trap", "special": true, "scene": "res://party/items/bear_trap.tscn", "icon": "res://party/art/bear_trap.webp", "size": Vector2(64, 44), "offset": Vector2(0, 6), "weight": 8, "kind": "trap"},
+	"glove": {"name": "Punching glove", "special": true, "scene": "res://party/items/glove.tscn", "icon": "res://party/art/glove.webp", "size": Vector2(64, 64), "weight": 7, "kind": "help"},
+	"spitter": {"name": "Spitter", "special": true, "scene": "res://party/items/spitter.tscn", "icon": "res://party/art/spitter.webp", "size": Vector2(64, 236), "offset": Vector2(0, -86), "weight": 6, "kind": "trap"},
+	"special_crate": {"name": "Special crate", "special": true, "scene": "res://party/items/special_crate.tscn", "icon": "res://party/art/special_crate.webp", "size": Vector2(64, 64), "weight": 4, "kind": "trap"},
+	"magnet": {"name": "Magnet", "special": true, "scene": "res://party/items/magnet.tscn", "icon": "res://party/art/magnet.webp", "size": Vector2(64, 64), "weight": 6, "kind": "trap"},
+	"ice_block": {"name": "Ice block", "special": true, "scene": "res://party/items/ice_block.tscn", "icon": "res://party/art/ice_block.webp", "size": Vector2(64, 64), "weight": 7, "kind": "trap"},
+	"glue_pad": {"name": "Glue pad", "special": true, "scene": "res://party/items/glue_pad.tscn", "icon": "res://party/art/glue_pad.webp", "size": Vector2(64, 36), "offset": Vector2(0, 12), "weight": 7, "kind": "trap"},
+	"alt_plank": {"name": "Alternating plank", "special": true, "scene": "res://party/items/alt_plank.tscn", "icon": "res://party/art/alt_plank.webp", "size": Vector2(192, 30), "weight": 7, "kind": "help"},
+	"balloon": {"name": "Balloon", "special": true, "scene": "res://party/items/balloon.tscn", "icon": "res://party/art/balloon.webp", "size": Vector2(48, 64), "weight": 6, "kind": "help"},
+	"black_hole": {"name": "Black hole", "special": true, "bomb": true, "black_hole": true, "radius": 300.0, "icon": "res://party/art/black_hole.webp", "size": Vector2(64, 64), "weight": 3, "kind": "bomb"},
 	# The card itself: turns into a special item when it's picked.
 	"special": {"name": "Special crate", "card": true, "icon": "res://party/art/special_crate.webp", "size": Vector2(64, 64), "weight": 0},
 }
