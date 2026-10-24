@@ -1,15 +1,17 @@
 extends Node2D
-## Special item: a saw whose blade goes back and forth along a long, wavy path,
-## speeding up and slowing down. Each one gets its own path when it's placed
-## (from its id, so it's the same on every computer online).
+## Special item: a saw whose blade glides back and forth along a long S-shaped
+## rail, always the same way, so it can be timed. Turn and flip it while placing
+## it to change which way the wave goes.
 
 @export var travel := 170.0
+## Height of the wave above and below the middle.
+@export var amplitude := 64.0
+## How many half-waves along the rail (2: one full S).
+@export var waves := 2.0
+## Seconds for a full trip there and back.
+@export var period := 3.6
 @export var spin_speed := 11.0
 
-var period := 3.2
-var amplitude := 60.0
-var waves := 1.5
-var wobble := 0.6
 var _t := 0.0
 @onready var _blade: Node2D = $Blade
 @onready var _sprite: Node2D = $Blade/Sprite2D
@@ -18,20 +20,17 @@ var _t := 0.0
 func _ready() -> void:
 	add_to_group("net_sync")
 	add_to_group("net_sync_slow")  # clients run the clock themselves
-	var rng := RandomNumberGenerator.new()
-	rng.seed = int(get_meta("record", {}).get("uid", 0)) * 7919 + 13
-	period = rng.randf_range(2.6, 4.2)
-	amplitude = rng.randf_range(40.0, 90.0) * (1.0 if rng.randf() < 0.5 else -1.0)
-	waves = rng.randf_range(1.0, 2.5)
-	wobble = rng.randf_range(0.3, 0.9)
 	_blade.position = path_at(0.0)
 
 
 ## Where the blade is `t` seconds into the round.
 func path_at(t: float) -> Vector2:
-	var u := TAU * t / period + wobble * sin(TAU * t / (period * 0.61))
-	var x := sin(u) * travel
-	return Vector2(x, sin(PI * waves * x / travel) * amplitude)
+	var x := sin(TAU * t / period) * travel
+	return Vector2(x, _wave(x))
+
+
+func _wave(x: float) -> float:
+	return -sin(PI * waves * (x + travel) / (2.0 * travel)) * amplitude
 
 
 func _physics_process(delta: float) -> void:
@@ -45,18 +44,17 @@ func reset_round() -> void:
 	_blade.position = path_at(0.0)
 
 
-func _process(_d: float) -> void:
-	queue_redraw()
-
-
 func _draw() -> void:
-	# The path: a dotted rail.
-	var n := 40
-	for i in n + 1:
-		var x := -travel + 2.0 * travel * i / n
-		var p := Vector2(x, sin(PI * waves * x / travel) * amplitude)
-		draw_circle(p, 5.0, Color.BLACK)
-		draw_circle(p, 3.0, Color("6cba7c"))
+	# The rail, like the saw's: where the blade will go.
+	var pts := PackedVector2Array()
+	for i in 49:
+		var x := -travel + 2.0 * travel * i / 48.0
+		pts.append(Vector2(x, _wave(x)))
+	draw_polyline(pts, Color.BLACK, 8.0)
+	draw_polyline(pts, Color("6cba7c"), 4.0)
+	for p in [pts[0], pts[pts.size() - 1]]:
+		draw_circle(p, 7.0, Color.BLACK)
+		draw_circle(p, 4.0, Color("b0e2bc"))
 
 
 func net_state() -> Array:

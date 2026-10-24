@@ -15,6 +15,15 @@ func _ready() -> void:
 		add_to_group("net_sync_slow")  # clients run the clock themselves
 
 
+## Will it be solid `seconds` from now? (Bots use it to plan their jumps.)
+func solid_in(seconds: float) -> bool:
+	return fmod(_t + seconds, ON + OFF) < ON
+
+
+func body_rid() -> RID:
+	return _body.get_rid()
+
+
 func reset_round() -> void:
 	_t = 0.0
 	_set_solid(true)

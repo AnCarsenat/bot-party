@@ -48,7 +48,7 @@ const BUILT_IN_ITEMS := {
 	"big_ferris": {"name": "Big ferris wheel", "special": true, "host": true, "scene": "res://party/items/ferris.tscn", "icon": "res://party/art/big_ferris.webp",
 		"props": {"radius": 240.0, "gondolas": 9, "spin": 0.32}, "size": Vector2(540, 580), "offset": Vector2(0, 30), "weight": 6},
 	"follower": {"name": "Follower", "special": true, "host": true, "scene": "res://party/items/follower.tscn", "icon": "res://party/art/follower.webp", "size": Vector2(64, 80), "offset": Vector2(0, 4), "weight": 6},
-	"sine_saw": {"name": "Sine saw", "special": true, "scene": "res://party/items/sine_saw.tscn", "icon": "res://party/art/sine_saw.webp", "size": Vector2(400, 220), "weight": 8},
+	"sine_saw": {"name": "Sine saw", "special": true, "scene": "res://party/items/sine_saw.tscn", "icon": "res://party/art/sine_saw.webp", "size": Vector2(404, 196), "weight": 8},
 	"h_bomb": {"name": "Hydrogen bomb", "special": true, "bomb": true, "radius": 450.0, "icon": "res://party/art/h_bomb.webp", "size": Vector2(64, 64), "weight": 4},
 	"bear_trap": {"name": "Bear trap", "special": true, "scene": "res://party/items/bear_trap.tscn", "icon": "res://party/art/bear_trap.webp", "size": Vector2(64, 44), "offset": Vector2(0, 6), "weight": 8},
 	"glove": {"name": "Punching glove", "special": true, "scene": "res://party/items/glove.tscn", "icon": "res://party/art/glove.webp", "size": Vector2(64, 64), "weight": 7},

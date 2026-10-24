@@ -633,11 +633,14 @@ func _make_ghost(id: String, slot: int) -> Node2D:
 	var def: Dictionary = Party.ITEMS[id]
 	var g: Node2D
 	if def.get("bomb", false):
+		# The picture sits in a holder: turning and flipping the ghost (orient)
+		# sets the holder's scale, and mustn't squash the picture.
+		g = Node2D.new()
 		var s := Sprite2D.new()
 		s.texture = Party.icon(id)
 		s.scale = Vector2(2, 2)
 		s.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		g = s
+		g.add_child(s)
 	else:
 		g = load(def.scene).instantiate()
 		for k in def.get("props", {}):

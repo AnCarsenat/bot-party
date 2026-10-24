@@ -2,8 +2,12 @@
 
 [ext_resource type="PackedScene" path="res://objects/platform.tscn" id="1"]
 [ext_resource type="Script" path="res://party/alt_plank.gd" id="2"]
+[ext_resource type="Texture2D" path="res://party/art/flicker_plank.webp" id="3"]
+[ext_resource type="Texture2D" path="res://party/art/flicker_plank_off.webp" id="4"]
 
 [node name="AltPlank" instance=ExtResource("1")]
 script = ExtResource("2")
 size = Vector2(192, 30)
 one_way = true
+solid_texture = ExtResource("3")
+ghost_texture = ExtResource("4")

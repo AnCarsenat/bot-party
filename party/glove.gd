@@ -1,22 +1,24 @@
 extends Node2D
-## Special item: a punching glove on a spring. When a robot steps in front of it,
-## it winds up for 3 seconds (shaking), then punches whoever is there at 45°, up
-## and in the direction it faces. Turn it and flip it while placing it.
+## Special item: a punching glove on a spring. It punches every 3 seconds (it
+## shakes just before), launching whoever is in front of it at 45°, up and in the
+## direction it faces. Turn it and flip it while placing it.
 
 const TEX := preload("res://party/art/glove.webp")
-const WIND_UP := 3.0
-const COOLDOWN := 1.0
+## Seconds between punches.
+const PERIOD := 3.0
+## It shakes this long before each punch.
+const WARN := 0.8
 
 @export var punch_speed := 1300.0
 
-var _wind := -1.0   # seconds of wind-up left (-1: waiting for someone)
-var _cool := 0.0
+var _t := 0.0
 var _punch := 0.0   # glove sticking out (looks)
 var _zone: Area2D
 
 
 func _ready() -> void:
 	add_to_group("net_sync")
+	add_to_group("net_sync_slow")  # clients run the clock themselves
 	var base := StaticBody2D.new()
 	base.collision_layer = Layers.WORLD
 	var cs := CollisionShape2D.new()
@@ -48,30 +50,26 @@ func direction() -> Vector2:
 
 
 func reset_round() -> void:
-	_wind = -1.0
-	_cool = 0.0
+	_t = 0.0
 	_punch = 0.0
+
+
+## Seconds until the next punch (bots and looks).
+func next_punch() -> float:
+	return PERIOD - fmod(_t, PERIOD)
 
 
 func _physics_process(delta: float) -> void:
 	_punch = maxf(0.0, _punch - delta * 3.0)
+	var before := int(_t / PERIOD)
+	_t += delta
+	if int(_t / PERIOD) == before:
+		return
+	_punch = 1.0  # punch!
 	if NetCheck.client(self):
 		return
-	if _cool > 0.0:
-		_cool -= delta
-		return
-	var inside := _robots()
-	if _wind < 0.0:
-		if not inside.is_empty():
-			_wind = WIND_UP
-		return
-	_wind -= delta
-	if _wind <= 0.0:
-		for p in inside:
-			p.bounce(punch_speed, 1.0, direction())
-		_wind = -1.0
-		_cool = COOLDOWN
-		_punch = 1.0
+	for p in _robots():
+		p.bounce(punch_speed, 1.0, direction())
 
 
 func _robots() -> Array:
@@ -84,17 +82,17 @@ func _process(_d: float) -> void:
 
 func _draw() -> void:
 	var shake := Vector2.ZERO
-	if _wind > 0.0:
-		var k := 1.0 - _wind / WIND_UP
-		shake = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * (1.0 + k * 3.0)
+	var left := next_punch()
+	if left < WARN:
+		shake = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * (1.0 + (1.0 - left / WARN) * 3.0)
 	var out := Vector2(18, -18) * _punch
 	draw_texture_rect(TEX, Rect2(Vector2(-32, -32) + shake + out, Vector2(64, 64)), false)
 
 
 func net_state() -> Array:
-	return [snappedf(_wind, 0.05), snappedf(_punch, 0.05)]
+	return [snappedf(_t, 0.01)]
 
 
 func net_apply(s: Array) -> void:
-	_wind = s[0]
-	_punch = maxf(_punch, s[1])
+	if absf(_t - s[0]) > 0.1:
+		_t = s[0]

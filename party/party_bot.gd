@@ -20,10 +20,10 @@ const SKILL_NAMES := ["Easy", "Normal", "Hard"]
 ##   builder: platforms, where they help it reach the flag;
 ##   chaos:   bombs and odd items, anywhere.
 const STYLES := ["normal", "trapper", "builder", "chaos"]
-## Seconds a bot takes to pick an item, by skill (a person takes about 4).
-const PICK_TIME := [Vector2(4.5, 6.0), Vector2(4.0, 5.0), Vector2(3.5, 4.0)]
+## Seconds a bot takes to pick an item, by skill.
+const PICK_TIME := [Vector2(3.0, 4.5), Vector2(2.5, 3.5), Vector2(2.0, 2.5)]
 ## Seconds before it puts its item down (moving it there included).
-const PLACE_TIME := [Vector2(3.5, 5.5), Vector2(3.0, 4.5), Vector2(2.5, 3.5)]
+const PLACE_TIME := [Vector2(2.0, 4.0), Vector2(1.5, 3.0), Vector2(1.0, 2.0)]
 
 const CELL := 32.0
 const BODY := Vector2(82, 82)  # the player's collision box (player.tscn)
@@ -74,6 +74,7 @@ var _dangers: Array = []   # [Rect2 now, Vector2 velocity, trap that switches on
 var _dangers_age := 99
 var _fans: Array = []      # [Rect2, push direction, strength, max speed]
 var _pads: Array = []      # trampolines: [Rect2, up direction, bounce speed]
+var _flickers: Array = []  # planks that come and go: [body RID, plank]
 var _seen_at := {}         # hazard shape id -> [where it was, physics frame] (to see it move)
 var _best := INF
 var _stuck := 0.0
@@ -527,6 +528,9 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 	var airborne := false
 	var floor_vel := Vector2.ZERO
 	var on_crumble := false
+	var on_flicker: Node = null  # the plank that comes and goes we're standing on
+	var gone: Array[RID] = []   # planks gone at this moment of the plan
+	_motion.exclude_bodies = gone
 	var i := 0
 	# The plan stops at its end or when we land after a jump. Then no keys: we
 	# must come to rest on the ground (a plan ending over a pit, or landing so
@@ -574,6 +578,15 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 				vel.x += v.x
 				jumping = false
 				on_floor = false
+		# Planks that come and go: not there when they'll be gone.
+		if not _flickers.is_empty():
+			var now: Array[RID] = []
+			for f in _flickers:
+				if is_instance_valid(f[1]) and not f[1].solid_in(i / 60.0 + [0.25, 0.15, 0.1][skill]):
+					now.append(f[0])
+			if now != gone:
+				gone = now
+				_motion.exclude_bodies = gone
 		# Move and slide (twice: along a wall or the floor after a hit). Standing
 		# on a conveyor or a moving plane carries us along.
 		var motion := vel * dt + floor_vel * dt
@@ -606,6 +619,7 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 				floor_vel = under.constant_linear_velocity
 			if under != null and "delay" in under and "_broken" in under:
 				on_crumble = true  # it'll give way
+			on_flicker = under.get_parent() if under != null and under.get_parent().has_method("solid_in") else null
 		if not on_floor:
 			airborne = true
 		for d in _dangers:
@@ -619,6 +633,10 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 		if airborne and on_floor and not floor_was and i > 6 and i < stop_at:
 			stop_at = i + 1  # landed
 		i += STEP
+	_motion.exclude_bodies = [] as Array[RID]
+	# Ending up on a plank that's about to go: like a crumbling block, not a place to stop.
+	if on_floor and on_flicker != null and is_instance_valid(on_flicker) and not on_flicker.solid_in(i / 60.0 + 0.9):
+		on_crumble = true
 	return {"pos": pos, "dead": false, "floor": on_floor, "frames": stop_at, "crumble": on_crumble and on_floor}
 
 
@@ -659,8 +677,11 @@ func _item_of(n: Node) -> Node:
 func _find_pushers() -> void:
 	_fans.clear()
 	_pads.clear()
+	_flickers.clear()
 	for n in ctl.get_parent().find_children("*", "Node2D", true, false):
-		if n is Trampoline and n.has_node("Pad"):
+		if n.has_method("solid_in") and n.has_method("body_rid"):
+			_flickers.append([n.body_rid(), n])
+		elif n is Trampoline and n.has_node("Pad"):
 			for c in n.get_node("Pad").get_children():
 				if c is CollisionShape2D and c.shape:
 					_pads.append([c.global_transform * c.shape.get_rect(), Vector2.UP.rotated(n.global_rotation), n.bounce_speed])
