@@ -130,6 +130,7 @@ Every key is optional except `name`.
 | `host` | `true` if other items can hang from it (it needs a `mounts()` method, like the ferris wheel). |
 | `bomb` | `true` for a bomb: it has no scene and destroys items within `radius` pixels. |
 | `special` | `true` for a special item: it never shows up in the box itself, only out of Special crates. |
+| `kind` | `"help"`, `"trap"` or `"bomb"`. Every box has at least one helpful item and one trap; items without a kind don't count for that. |
 
 The game's item scenes you can start from:
 

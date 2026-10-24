@@ -20,6 +20,9 @@ const SKILL_NAMES := ["Easy", "Normal", "Hard"]
 ##   builder: platforms, where they help it reach the flag;
 ##   chaos:   bombs and odd items, anywhere.
 const STYLES := ["normal", "trapper", "builder", "chaos"]
+## Extra cost of a cell on (or next to) a trap, for finding the way: a few cells
+## of detour are better than going past a trap.
+const TRAP_COST := 4
 ## Frames a bot looks ahead at the spot where a move ends: a trap coming
 ## through there soon makes it a bad place to stop.
 const REST_LOOK := 45
@@ -65,18 +68,34 @@ var _looks: Array = []     # cards it looks at before going to the one it wants
 var _target := Vector2.INF
 var _target_time := 0.0
 # Race.
-var _field := {}           # Vector2i -> distance to the flag, in cells
+# The arena as a grid of cells, flat arrays (index y * _w + x): fast to go through.
+var _w := 0
+var _h := 0
+var _field := PackedInt32Array()      # distance to the flag, in steps (FAR: can't get there)
+var _free := PackedByteArray()        # 1: a robot fits in that cell
+var _height := PackedInt32Array()     # how high above the floor
+var _trap_cost := PackedInt32Array()  # extra cost (near traps)
+var _coin_field := PackedInt32Array() # distance to the coin
+var _coin_for := Vector2.INF
+var _coin_to_flag := 0.0
+var _coin_mood := true     # does it fancy the coin this time
+var _going_coin := false
+var _coin_check := 0
 var _field_key := ""       # which arena layout it was made for
 var _origin := Vector2.ZERO
 var _phase := -1
 ## Distance maps shared by all bots: {key: [field, origin]} (only the latest is kept).
 static var _shared := {}
+static var _shared_coin := {}
+static var _base := {}  # arena -> cells free of the arena itself (items left out): scanned once  # field key + coin cell -> distance to the coin (one for all bots)
+const FAR := 1 << 30
 var _plan: Array = []      # per frame: [dir, jump held]
 var _commit := 0
 var _dangers: Array = []   # [Rect2 now, Vector2 velocity, trap that switches on and off or null,
                            #  track or null, how it moves: [item, host, mount] or null]
 var _shooters: Array = []  # crossbows: [muzzle, bolt velocity, next shot in, interval, bolt flight time, size]
 var _dangers_age := 99
+var _reach: Array[Rect2] = []  # per danger: everywhere it can be while a plan runs
 var _fans: Array = []      # [Rect2, push direction, strength, max speed]
 var _pads: Array = []      # trampolines: [Rect2, up direction, bounce speed]
 var _flickers: Array = []  # planks that come and go: [body RID, plank]
@@ -89,9 +108,16 @@ var _query := PhysicsShapeQueryParameters2D.new()
 var _motion := PhysicsTestMotionParameters2D.new()
 var _result := PhysicsTestMotionResult2D.new()
 
+## Planning is the costly part: all bots together get this much per physics frame
+## (a bot that still has moves left waits a frame rather than make the game stutter).
+const PLAN_BUDGET_USEC := 16000
+static var _budget_frame := -1
+static var _budget_used := 0
+
 
 func _init(for_slot := 0, bot_skill := Skill.NORMAL, bot_style := "normal") -> void:
 	slot = for_slot
+	_coin_check = 3 + slot * 3  # not all bots on the same frame
 	skill = bot_skill
 	style = bot_style if bot_style in STYLES else "normal"
 	name = "Bot%d" % slot
@@ -408,7 +434,11 @@ func _floor_below(pos: Vector2) -> float:
 # --- Race -----------------------------------------------------------------------------------
 
 func _physics_process(_delta: float) -> void:
-	if not is_instance_valid(ctl) or ctl.phase != ctl.Phase.RUN:
+	if not is_instance_valid(ctl):
+		return
+	if ctl.phase == ctl.Phase.COUNTDOWN and _field_key == "" and slot == _first_bot():
+		_make_field()  # ready before the race (the others share it)
+	if ctl.phase != ctl.Phase.RUN:
 		return
 	var p = ctl.players.get(slot)
 	if not is_instance_valid(p) or p.get_meta("eliminated", false) or p.get_meta("finished", false) or not p.is_physics_processing():
@@ -421,6 +451,10 @@ func _physics_process(_delta: float) -> void:
 		return
 	if _field_key == "":
 		_make_field()
+	_coin_check -= 1
+	if _coin_check <= 0:
+		_coin_check = 20
+		_think_coin(p)
 	var d := _dist(p.global_position)
 	if d < _best - 0.5:
 		_best = d
@@ -429,7 +463,14 @@ func _physics_process(_delta: float) -> void:
 		_stuck += 1.0 / 60.0
 	_commit -= 1
 	if _plan.is_empty() or _commit <= 0:
-		_make_plan(p)
+		var frame := Engine.get_physics_frames()
+		if _budget_frame != frame:
+			_budget_frame = frame
+			_budget_used = 0
+		if _plan.is_empty() or _budget_used < PLAN_BUDGET_USEC or _commit < -2:
+			var t0 := Time.get_ticks_usec()
+			_make_plan(p)
+			_budget_used += Time.get_ticks_usec() - t0
 	var step = _plan.pop_front()
 	_hold("move_left", step[0] < 0)
 	_hold("move_right", step[0] > 0)
@@ -492,6 +533,7 @@ func _make_plan(p: Node) -> void:
 	else:
 		_refresh_dangers()
 	_dangers_age += 1
+	_find_reach()
 	var scored := []
 	for plan in _candidates(p):
 		var sim := _simulate(p, plan)
@@ -551,6 +593,8 @@ func _score(sim: Dictionary, plan: Array) -> float:
 	if sim.dead:
 		return 1e9 - sim.at  # if nothing is safe: what keeps us alive longest
 	var d := _dist(sim.pos)
+	if sim.get("coin", false):
+		d = _field_at(_field, sim.pos, ctl._goal.global_position) - 2.0  # got it: on to the flag
 	if d == INF:
 		return 1e8
 	var score := d
@@ -560,6 +604,9 @@ func _score(sim: Dictionary, plan: Array) -> float:
 		score += 2.0  # don't stop on a crumbling block
 	# Stopping where a trap is about to sweep through: a dead end (the sooner, the worse).
 	score += sim.get("threat", 0.0) * 30.0
+	# Through a bear trap or spit: only if there's no other way (it costs time, not the round).
+	if sim.get("soft", false):
+		score += 40.0
 	if plan[0][1] or plan[mini(10, plan.size() - 1)][1]:
 		score += 0.3  # don't jump for nothing
 	return score
@@ -567,6 +614,8 @@ func _score(sim: Dictionary, plan: Array) -> float:
 
 ## A small copy of the player's movement (player.gd), run ahead with test moves.
 func _simulate(p: Node, plan: Array) -> Dictionary:
+	if _reach.size() != _dangers.size():
+		_find_reach()
 	var pos: Vector2 = p.global_position
 	var vel: Vector2 = p.velocity
 	var on_floor: bool = p.is_on_floor()
@@ -576,10 +625,28 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 	var coyote: float = p.coyote_timer
 	var dt := STEP / 60.0
 	var cam = ctl._camera()
+	if cam and not cam.has_method("is_out_of_bounds"):
+		cam = null
+	# The player's numbers, read once (reading them off the node every step is slow).
+	var gravity: float = p.gravity
+	var fall_mult: float = p.fall_gravity_multiplier
+	var max_fall: float = p.max_fall_speed
+	var coyote_time: float = p.coyote_time
+	var jump_speed: float = p.jump_speed
+	var jump_cut: float = p.jump_cut
+	var ground_accel: float = p.ground_accel
+	var air_accel: float = p.air_accel
+	var run_speed: float = p.speed
+	var wind: float = p.wind_vx
+	var rid: RID = p.get_rid()
+	var flicker_lead: float = [0.25, 0.15, 0.1][skill]
+	var lag: float = [0.0, 0.1, 0.15][skill]
 	var airborne := false
 	var floor_vel := Vector2.ZERO
 	var on_crumble := false
 	var on_flicker: Node = null  # the plank that comes and goes we're standing on
+	var soft := false  # went through something best avoided (bear trap, spit)
+	var got_coin := false  # passed through the coin it's going for
 	var gone: Array[RID] = []   # planks gone at this moment of the plan
 	_motion.exclude_bodies = gone
 	var i := 0
@@ -599,22 +666,22 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 		var pressed := held and not was_held
 		was_held = held
 		if not on_floor:
-			var g: float = p.gravity * (p.fall_gravity_multiplier if vel.y > 0.0 else 1.0)
-			vel.y = minf(vel.y + g * dt, p.max_fall_speed)
+			var g: float = gravity * (fall_mult if vel.y > 0.0 else 1.0)
+			vel.y = minf(vel.y + g * dt, max_fall)
 			coyote -= dt
 		else:
-			coyote = p.coyote_time
+			coyote = coyote_time
 			jumping = false
 		if pressed and coyote > 0.0:
-			vel.y = p.jump_speed
+			vel.y = jump_speed
 			coyote = 0.0
 			jumping = true
 			on_floor = false
 		if jumping and vel.y < 0.0 and not held:
-			vel.y *= p.jump_cut
+			vel.y *= jump_cut
 			jumping = false
-		var accel: float = p.ground_accel if on_floor else p.air_accel
-		vel.x = move_toward(vel.x, dir * p.speed + p.wind_vx, accel * dt)
+		var accel: float = ground_accel if on_floor else air_accel
+		vel.x = move_toward(vel.x, dir * run_speed + wind, accel * dt)
 		# Fans blow, trampolines launch (as fan.gd and trampoline.gd do).
 		for f in _fans:
 			if f[0].has_point(pos):
@@ -633,7 +700,7 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 		if not _flickers.is_empty():
 			var now: Array[RID] = []
 			for f in _flickers:
-				if is_instance_valid(f[1]) and not f[1].solid_in(i / 60.0 + [0.25, 0.15, 0.1][skill]):
+				if is_instance_valid(f[1]) and not f[1].solid_in(i / 60.0 + flicker_lead):
 					now.append(f[0])
 			if now != gone:
 				gone = now
@@ -644,7 +711,7 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 		for k in 2:
 			_motion.from = Transform2D(0.0, pos)
 			_motion.motion = motion
-			if PhysicsServer2D.body_test_motion(p.get_rid(), _motion, _result):
+			if PhysicsServer2D.body_test_motion(rid, _motion, _result):
 				pos += _result.get_travel()
 				var n := _result.get_collision_normal()
 				if n.y < -0.6:
@@ -660,7 +727,7 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 		var floor_was := on_floor
 		_motion.from = Transform2D(0.0, pos)
 		_motion.motion = Vector2(0, 2)
-		on_floor = vel.y >= 0.0 and PhysicsServer2D.body_test_motion(p.get_rid(), _motion, _result) \
+		on_floor = vel.y >= 0.0 and PhysicsServer2D.body_test_motion(rid, _motion, _result) \
 			and _result.get_collision_normal().y < -0.6
 		floor_vel = Vector2.ZERO
 		if on_floor:
@@ -673,15 +740,22 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 			on_flicker = under.get_parent() if under != null and under.get_parent().has_method("solid_in") else null
 		if not on_floor:
 			airborne = true
-		for d in _dangers:
+		if _going_coin and not got_coin and pos.distance_to(_coin_for) < 64.0:
+			got_coin = true
+		for di in _dangers.size():
+			if not _reach[di].has_point(pos):
+				continue  # nowhere near anything it can do while the plan runs
+			var d: Array = _dangers[di]
 			# Where that trap or bolt will be by then.
 			if d[2] != null and is_instance_valid(d[2]):
 				# On and off traps (flamethrowers): out if it's on at any time close to then.
 				var t := i / 60.0
-				var lag: float = [0.0, 0.1, 0.15][skill]
 				if not (d[2].firing_in(t) or d[2].firing_in(t + lag) or d[2].firing_in(maxf(0.0, t - lag))):
 					continue
 			if _moved(d, i / 60.0).has_point(pos):
+				if d.size() > 7 and d[7]:
+					soft = true  # a bear trap or spit: best avoided, but not the end
+					continue
 				return {"pos": pos, "dead": true, "floor": on_floor, "frames": stop_at, "at": i}
 		# Bolts crossbows haven't shot yet.
 		for s in _shooters:
@@ -692,7 +766,7 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 					break
 				if since <= s[4] and Rect2(s[0] + s[1] * since, Vector2.ZERO).grow_individual(s[5].x, s[5].y, s[5].x, s[5].y).has_point(pos):
 					return {"pos": pos, "dead": true, "floor": on_floor, "frames": stop_at, "at": i}
-		if cam and cam.has_method("is_out_of_bounds") and cam.is_out_of_bounds(pos):
+		if cam and cam.is_out_of_bounds(pos):
 			return {"pos": pos, "dead": true, "floor": false, "frames": stop_at, "at": i}
 		if airborne and on_floor and not floor_was and i > 6 and i < stop_at:
 			stop_at = i + 1  # landed
@@ -703,7 +777,10 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 	if on_floor:
 		for j in range(0, REST_LOOK, 3):
 			var t := (i + j) / 60.0
-			for d in _dangers:
+			for di in _dangers.size():
+				if not _reach[di].has_point(pos):
+					continue
+				var d: Array = _dangers[di]
 				if d[2] != null and is_instance_valid(d[2]) and not d[2].firing_in(t):
 					continue
 				if _moved(d, t).has_point(pos):
@@ -714,7 +791,7 @@ func _simulate(p: Node, plan: Array) -> Dictionary:
 	# Ending up on a plank that's about to go: like a crumbling block, not a place to stop.
 	if on_floor and on_flicker != null and is_instance_valid(on_flicker) and not on_flicker.solid_in(i / 60.0 + 0.9):
 		on_crumble = true
-	return {"pos": pos, "dead": false, "floor": on_floor, "frames": stop_at, "crumble": on_crumble and on_floor, "threat": threat}
+	return {"pos": pos, "dead": false, "floor": on_floor, "frames": stop_at, "crumble": on_crumble and on_floor, "threat": threat, "soft": soft, "coin": got_coin}
 
 
 ## Traps where they are now (the list is only made again every few plans; the
@@ -727,6 +804,28 @@ func _refresh_dangers() -> void:
 	for s in _shooters:
 		s[2] -= (Engine.get_physics_frames() - int(s[6])) / 60.0
 		s[6] = Engine.get_physics_frames()
+
+
+## Everywhere each danger can be in the next few seconds (as long as a plan and
+## its look ahead), so the simulation skips the ones far away at a glance.
+const REACH_TIME := 3.6
+func _find_reach() -> void:
+	_reach.resize(_dangers.size())
+	for di in _dangers.size():
+		var d: Array = _dangers[di]
+		var r: Rect2 = d[0]
+		if d.size() > 4 and d[4] != null:
+			var t := 0.0
+			while t <= REACH_TIME:
+				r = r.merge(_moved(d, t))
+				t += 0.05
+			r = r.grow(12.0)  # between the looks
+		elif d[1] != Vector2.ZERO:
+			if d[3] != null:
+				r = r.merge(d[3])
+			else:
+				r = r.merge(Rect2(r.position + d[1] * REACH_TIME, r.size))
+		_reach[di] = r
 
 
 ## Where a danger will be `t` seconds from now (bouncing back and forth on its track).
@@ -831,7 +930,7 @@ func _find_dangers(p: Node) -> Array:
 						how = [mover, host, mount]
 				out.append([r.grow_individual(half.x + margin, half.y + margin, half.x + margin, half.y + margin), v, timed,
 					track.grow_individual(half.x + margin, half.y + margin, half.x + margin, half.y + margin) if track else null, how,
-					c, half + Vector2(margin, margin)])
+					c, half + Vector2(margin, margin), avoid])
 		# Mines: touching the trigger is out (that's the hazard above). The blast
 		# only matters when someone else is about to touch it (right next to it
 		# and coming closer).
@@ -870,16 +969,24 @@ func _find_dangers(p: Node) -> Array:
 ## floor cost a bit more, so routes follow the ground.
 func _make_field() -> void:
 	_best = INF
-	_field_key = "%d:%s:%d:%d" % [ctl.get_instance_id(), str(_party().session.get("round", 0)), _phase, ctl.placed_items().size()]
+	_field_key = _layout_key()
+	_coin_field = PackedInt32Array()
 	if _shared.has(_field_key):
-		_field = _shared[_field_key][0]
-		_origin = _shared[_field_key][1]
+		var sh: Array = _shared[_field_key]
+		_field = sh[0]
+		_origin = sh[1]
+		_free = sh[2]
+		_height = sh[3]
+		_trap_cost = sh[4]
+		_w = sh[5]
+		_h = sh[6]
 		return
-	_field = {}
 	var area: Rect2 = ctl.build_area.grow(200)
 	_origin = area.position
 	var w := int(area.size.x / CELL) + 1
 	var h := int(area.size.y / CELL) + 1
+	_w = w
+	_h = h
 	var shape := RectangleShape2D.new()
 	shape.size = BODY - Vector2(6, 6)
 	_query.shape = shape
@@ -887,68 +994,171 @@ func _make_field() -> void:
 	_query.collide_with_areas = false
 	var space: PhysicsDirectSpaceState2D = ctl.get_viewport().world_2d.direct_space_state
 	var cam = ctl._camera()
-	var free := {}
-	for y in h:
-		for x in w:
-			var c := Vector2i(x, y)
-			var pos := _center(c)
-			if cam and cam.has_method("is_out_of_bounds") and cam.is_out_of_bounds(pos):
-				continue
-			_query.transform = Transform2D(0.0, pos)
-			if _solid(space.intersect_shape(_query, 4)):
-				continue
-			free[c] = true
+	var bounds: bool = cam != null and cam.has_method("is_out_of_bounds")
+	# The arena itself doesn't change: scanned once, then only the cells round the
+	# items are looked at again.
+	var base_key := "%d:%s" % [ctl.get_instance_id(), area]
+	if not _base.has(base_key):
+		var base := PackedByteArray()
+		base.resize(w * h)
+		for y in h:
+			for x in w:
+				var pos := _center(Vector2i(x, y))
+				if bounds and cam.is_out_of_bounds(pos):
+					continue
+				_query.transform = Transform2D(0.0, pos)
+				if _solid(space.intersect_shape(_query, 8), true):
+					continue
+				base[y * w + x] = 1
+		_base = {base_key: base}
+	var free: PackedByteArray = _base[base_key].duplicate()
+	for item in ctl.placed_items():
+		if not is_instance_valid(item):
+			continue
+		var r := _item_rect(item).grow(BODY.x)
+		var a := _cell(r.position)
+		var b := _cell(r.end)
+		for y in range(maxi(a.y, 0), mini(b.y + 1, h)):
+			for x in range(maxi(a.x, 0), mini(b.x + 1, w)):
+				if free[y * w + x] == 0:
+					continue
+				_query.transform = Transform2D(0.0, _center(Vector2i(x, y)))
+				if _solid(space.intersect_shape(_query, 4)):
+					free[y * w + x] = 0
 	# How high above the floor each free cell is (0 = standing height).
-	var height := {}
+	var height := PackedInt32Array()
+	height.resize(w * h)
 	for x in w:
 		var above := 99
 		for y in range(h - 1, -1, -1):
-			var c := Vector2i(x, y)
-			if not free.has(c):
+			if free[y * w + x] == 0:
 				above = -1
 			else:
 				above += 1
-				height[c] = above
-	# Dijkstra from the flag (costs are small integers: bucket queue).
-	var goal: Vector2 = ctl._goal.global_position
-	var buckets := {0: []}
-	for c in free:
-		if _center(c).distance_to(goal) < 72.0:
-			_field[c] = 0
-			buckets[0].append(c)
+				height[y * w + x] = above
+	_free = free
+	_height = height
+	_trap_cost = _trap_cells()
+	_field = _dijkstra(ctl._goal.global_position)
+	_shared = {_field_key: [_field, _origin, _free, _height, _trap_cost, _w, _h]}
+	_shared_coin.clear()
+
+
+## Where an item is solid now (its spot, and its bodies wherever they've got to).
+func _item_rect(item: Node) -> Rect2:
+	var rec: Dictionary = item.get_meta("record", {})
+	var r := Rect2(item.global_position, Vector2.ZERO).grow(64.0)
+	if _party().ITEMS.has(rec.get("id", "")):
+		r = r.merge(ctl._footprint(rec.id, item.global_position, int(rec.get("rot", 0))))
+	for c in item.find_children("*", "CollisionShape2D", true, false):
+		if c.shape and c.get_parent() is CollisionObject2D and not (c.get_parent() is Area2D):
+			r = r.merge(c.global_transform * c.shape.get_rect())
+	return r
+
+
+## What the grid depends on: the round and where the items are.
+func _layout_key() -> String:
+	var items: Array = ctl.placed_items()
+	var sum := Vector2.ZERO
+	for it in items:
+		if is_instance_valid(it):
+			sum += (it.global_position / 8.0).round()
+	return "%d:%s:%d:%s" % [ctl.get_instance_id(), str(_party().session.get("round", 0)), items.size(), sum]
+
+
+## Extra cost of going through each cell: on a trap's spot, or along its track.
+## So bots take a way round traps when there's one.
+func _trap_cells() -> PackedInt32Array:
+	var out := PackedInt32Array()
+	out.resize(_w * _h)
+	var party := _party()
+	for item in ctl.placed_items():
+		var rec: Dictionary = item.get_meta("record", {})
+		if party.ITEMS.get(rec.get("id", ""), {}).get("kind", "") != "trap":
+			continue
+		var r: Rect2 = ctl._footprint(rec.id, item.global_position, int(rec.get("rot", 0))).grow(BODY.x * 0.5)
+		var a := _cell(r.position)
+		var b := _cell(r.end)
+		for y in range(maxi(a.y, 0), mini(b.y + 1, _h)):
+			for x in range(maxi(a.x, 0), mini(b.x + 1, _w)):
+				out[y * _w + x] += TRAP_COST
+	return out
+
+
+## Distance (in steps) from every free cell to `goal`, round walls (Dijkstra,
+## from the goal; costs are small integers: bucket queue).
+func _dijkstra(goal: Vector2) -> PackedInt32Array:
+	var w := _w
+	var n_cells := _w * _h
+	var field := PackedInt32Array()
+	field.resize(n_cells)
+	field.fill(FAR)
+	var buckets := {}
+	var first := PackedInt32Array()
+	var gc := _cell(goal)
+	for y in range(maxi(gc.y - 3, 0), mini(gc.y + 4, _h)):
+		for x in range(maxi(gc.x - 3, 0), mini(gc.x + 4, _w)):
+			var i := y * w + x
+			if _free[i] == 1 and _center(Vector2i(x, y)).distance_to(goal) < 72.0:
+				field[i] = 0
+				first.append(i)
+	buckets[0] = first
 	var cost := 0
-	var left := buckets.size()
-	while left > 0 and cost < 20000:
-		var list: Array = buckets.get(cost, [])
-		buckets.erase(cost)
-		left = buckets.size()
-		for c in list:
-			if _field.get(c, INF) < cost:
-				continue
-			for dir in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-				var n: Vector2i = c + dir
-				if not free.has(n):
+	while not buckets.is_empty() and cost < 20000:
+		if buckets.has(cost):
+			var list: PackedInt32Array = buckets[cost]
+			buckets.erase(cost)
+			for i in list:
+				if field[i] < cost:
 					continue
-				# We search backwards from the flag: going "down" here is climbing for the racer.
-				var step := 1
-				if dir == Vector2i.DOWN:
-					step = 3
-				if height.get(n, 99) > 4:
-					step += 2
-				var nc := cost + step
-				if nc < _field.get(n, INF):
-					_field[n] = nc
-					if not buckets.has(nc):
-						buckets[nc] = []
-					buckets[nc].append(n)
-		left = buckets.size()
+				var x := i % w
+				# We search backwards from the goal: going "down" here is climbing for the racer.
+				for k in 4:
+					var n := i
+					var step := 1
+					if k == 0:
+						if x == 0: continue
+						n = i - 1
+					elif k == 1:
+						if x == w - 1: continue
+						n = i + 1
+					elif k == 2:
+						n = i - w
+						if n < 0: continue
+					else:
+						n = i + w
+						if n >= n_cells: continue
+						step = 3
+					if _free[n] == 0:
+						continue
+					if _height[n] > 4:
+						step += 2
+					var nc := cost + step + _trap_cost[n]
+					if nc < field[n]:
+						field[n] = nc
+						if buckets.has(nc):
+							var b: PackedInt32Array = buckets[nc]
+							b.append(n)
+							buckets[nc] = b
+						else:
+							buckets[nc] = PackedInt32Array([n])
 		cost += 1
-	_shared = {_field_key: [_field, _origin]}
+	return field
 
 
-func _solid(hits: Array) -> bool:
+## A grid value at a cell (FAR outside the grid or where it can't be reached).
+func _grid(arr: PackedInt32Array, c: Vector2i) -> float:
+	if c.x < 0 or c.y < 0 or c.x >= _w or c.y >= _h or arr.is_empty():
+		return INF
+	var v := arr[c.y * _w + c.x]
+	return INF if v >= FAR else float(v)
+
+
+func _solid(hits: Array, arena_only := false) -> bool:
 	for hit in hits:
 		var body = hit.collider
+		if arena_only and body is Node and _item_of(body) != null:
+			continue  # an item: looked at separately
 		if body is CollisionObject2D:
 			var owner_id: int = body.shape_find_owner(hit.shape)
 			if body.is_shape_owner_one_way_collision_enabled(owner_id):
@@ -965,16 +1175,52 @@ func _cell(pos: Vector2) -> Vector2i:
 	return Vector2i(((pos - _origin) / CELL).floor())
 
 
-## Distance to the flag from `pos` (the best of its cell and the ones around it).
+## How far `pos` still is: to the flag, or (going for the coin) to the coin and
+## then on to the flag.
 func _dist(pos: Vector2) -> float:
+	if _going_coin and not _coin_field.is_empty():
+		return _field_at(_coin_field, pos, _coin_for) + _coin_to_flag
+	return _field_at(_field, pos, ctl._goal.global_position)
+
+
+## A distance map's value at `pos` (the best of its cell and the ones around it).
+func _field_at(field: PackedInt32Array, pos: Vector2, goal: Vector2) -> float:
 	var c := _cell(pos)
-	var best: float = _field.get(c, INF)
+	var best: float = _grid(field, c)
 	if best == INF:
 		for dy in [-1, 0, 1]:
 			for dx in [-1, 0, 1]:
-				best = minf(best, _field.get(c + Vector2i(dx, dy), INF) + 1.0)
+				best = minf(best, _grid(field, c + Vector2i(dx, dy)) + 1.0)
 	# A little extra precision inside the cell.
-	return best + (pos.distance_to(ctl._goal.global_position) / CELL) * 0.01
+	return best + (pos.distance_to(goal) / CELL) * 0.01
+
+
+## Is the coin worth a detour (even going back for it)? Looked at now and then
+## during the race: the extra way it costs, against how much the bot wants it.
+func _think_coin(p: Node) -> void:
+	var coin = ctl._coin if is_instance_valid(ctl._coin) else null
+	var want := false
+	if coin and coin.visible and coin.get("carrier") == null and not p.get_meta("coin", false):
+		var at: Vector2 = coin.global_position
+		if _coin_field.is_empty() or _coin_for.distance_to(at) > 40.0:
+			var key := "%s|%s" % [_field_key, _cell(at)]
+			if not _shared_coin.has(key):
+				_shared_coin[key] = _dijkstra(at)
+			_coin_field = _shared_coin[key]
+			_coin_for = at
+			_coin_mood = _rng.randf() < [0.6, 0.8, 0.9][skill]  # not every time
+		_coin_to_flag = _field_at(_field, at, ctl._goal.global_position)
+		var direct := _field_at(_field, p.global_position, ctl._goal.global_position)
+		var detour := _field_at(_coin_field, p.global_position, at) + _coin_to_flag - direct
+		var limit: float = [10.0, 18.0, 28.0][skill] * (1.5 if style == "chaos" else 1.0)
+		if _going_coin and _stuck > 3.0:
+			_coin_mood = false  # can't get to it: forget it
+		want = _coin_mood and detour < limit
+	if want != _going_coin:
+		_going_coin = want
+		_best = INF  # a new goal: what counts as progress changes
+		_stuck = 0.0
+		_plan.clear()
 
 
 ## The way to the flag from the start, as points (for placing traps on it).
@@ -982,27 +1228,38 @@ func _route() -> Array:
 	if _field_key == "":
 		_make_field()
 	var c := _cell(ctl.spawn_origin)
-	if not _field.has(c):
+	if _grid(_field, c) == INF:
 		var best := INF
-		for k in _field:
-			var d := Vector2(k - c).length()
-			if d < best:
-				best = d
-				c = k
+		for i in _field.size():
+			if _field[i] < FAR:
+				var k := Vector2i(i % _w, i / _w)
+				var d := Vector2(k - c).length()
+				if d < best:
+					best = d
+					c = k
 	var out := []
 	for i in 400:
 		out.append(_center(c))
-		var here: int = _field.get(c, 0)
-		if here == 0:
+		var here := _grid(_field, c)
+		if here == 0 or here == INF:
 			break
 		var next := c
 		for dir in [Vector2i.LEFT, Vector2i.RIGHT, Vector2i.UP, Vector2i.DOWN]:
-			if _field.get(c + dir, INF) < _field.get(next, INF):
+			if _grid(_field, c + dir) < _grid(_field, next):
 				next = c + dir
 		if next == c:
 			break
 		c = next
 	return out
+
+
+## The lowest slot that's a bot (it does the shared work).
+func _first_bot() -> int:
+	var low := slot
+	for b in get_parent().get_children():
+		if b != self and "slot" in b and b.get_script() == get_script():
+			low = mini(low, b.slot)
+	return low
 
 
 func _party() -> Node:

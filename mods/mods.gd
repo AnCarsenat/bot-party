@@ -222,6 +222,8 @@ func _item(m: Dictionary, item_id: String, d) -> Dictionary:
 		"size": _value(d.get("size", [64, 64])), "weight": clampi(int(d.get("weight", 8)), 0, 20)}
 	if d.has("offset"):
 		def.offset = _value(d.offset)
+	if str(d.get("kind", "")) in ["help", "trap", "bomb"]:
+		def.kind = str(d.kind)
 	for flag in ["host", "bomb", "special"]:
 		if d.get(flag, false):
 			def[flag] = true

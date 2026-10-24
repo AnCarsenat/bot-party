@@ -78,6 +78,11 @@ func _process(delta: float) -> void:
 		count += 1
 
 	if count == 0:
+		if follow_speed <= 0.0 and _home != Vector2.INF:
+			# Nobody to watch (between rounds): back to where it belongs.
+			var t := 1.0 - exp(-3.0 * delta)
+			global_position = global_position.lerp(_home, t)
+			zoom = zoom.lerp(_home_zoom, t)
 		return
 
 	if follow_speed <= 0.0:

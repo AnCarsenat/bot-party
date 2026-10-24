@@ -46,6 +46,7 @@ func _become(id: String) -> void:
 	if id == current and is_instance_valid(_inside):
 		return
 	if is_instance_valid(_inside):
+		remove_child(_inside)  # now: the new one must get the same name (online, paths must match)
 		_inside.queue_free()
 	current = id
 	var def: Dictionary = get_node("/root/Party").ITEMS[id]
@@ -54,11 +55,21 @@ func _become(id: String) -> void:
 		_inside.set(k, def.props[k])
 	_inside.name = "Inside"
 	add_child(_inside)
+	_add_mod_script(_inside, def)
 	# Its traps count for whoever placed the crate.
 	for h in _inside.find_children("*", "Area2D", true, false):
 		if h is Hazard:
 			h.owner_slot = get_meta("owner_slot", 0)
 	queue_redraw()
+
+
+## A mod item's own script (like PartyController._add_mod_script).
+static func _add_mod_script(item: Node, def: Dictionary) -> void:
+	if def.has("script"):
+		var behaviour := Node.new()
+		behaviour.name = "ModScript"
+		behaviour.set_script(load(def.script))
+		item.add_child(behaviour)
 
 
 func reset_round() -> void:

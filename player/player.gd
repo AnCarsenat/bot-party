@@ -52,7 +52,7 @@ var actual_velocity := Vector2.ZERO
 var wind_vx := 0.0
 ## Effects on the robot (party traps): name -> seconds left. The host runs them;
 ## online clients only show them.
-##   stuck     can't move or jump (bear trap)
+##   stuck     held in place, even in mid-air (bear trap)
 ##   slippery  hardly any grip (spitter, ice)
 ##   slowed    half speed, lower jumps (glue)
 ##   floating  drifts up slowly (balloon)
@@ -228,7 +228,9 @@ func platformer_movement(delta: float) -> void:
 		return
 	var stuck := has_status("stuck")
 	var slowed := has_status("slowed")
-	if has_status("floating"):
+	if stuck:
+		velocity = Vector2.ZERO  # held where it was caught, even in mid-air
+	elif has_status("floating"):
 		velocity.y = move_toward(velocity.y, -170.0, 2400.0 * delta)
 	elif not is_on_floor():
 		var g := gravity * (fall_gravity_multiplier if velocity.y > 0.0 else 1.0)
@@ -236,7 +238,7 @@ func platformer_movement(delta: float) -> void:
 	elif velocity.y > 0.0:
 		velocity.y = 0.0
 	var pulled := _pull if _pull_frame >= Engine.get_physics_frames() - 1 else Vector2.ZERO
-	if pulled.y != 0.0:
+	if pulled.y != 0.0 and not stuck:
 		velocity.y += pulled.y * delta * 4.0
 
 	# Coyote time: refill while grounded, count down once airborne.

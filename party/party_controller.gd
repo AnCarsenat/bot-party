@@ -548,10 +548,18 @@ func _spit_out(item: Node, center: Vector2) -> void:
 	item.queue_free()
 	var spot := center
 	var rot := _rng.randi() % 4
-	for tries in 12:
-		spot = (center + Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(140.0, 420.0)).clamp(build_area.position, build_area.end)
+	var found := false
+	for tries in 16:
+		spot = (center + Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(140.0, 420.0 + tries * 30.0)).clamp(build_area.position, build_area.end)
 		if can_place(rec.id, spot, rot):
+			found = true
 			break
+	if not found:
+		# Nowhere it may go (big items near the start or the flag): swallowed after all.
+		Party.session.items.erase(rec)
+		for h in hanging:
+			Party.session.items.erase(h)
+		return
 	rec.x = spot.x
 	rec.y = spot.y
 	rec.rot = rot
@@ -636,6 +644,9 @@ func _start_pick() -> void:
 			if box.count(k) >= 2:
 				skip.append(k)
 		var id: String = Party.pick_item(_rng, skip)
+		if Party.weight(id) == 0:
+			# Nothing else is on: repeats are fine then.
+			id = Party.pick_item(_rng, bomb_ids if no_bombs else [])
 		if id in bomb_ids:
 			no_bombs = true
 		# Now and then a Special crate instead (Party > Rules > Specials).
@@ -659,11 +670,11 @@ func _start_pick() -> void:
 ## If no card in the box is of `kind` ("help" or "trap"), one card becomes one.
 func _ensure_kind(kind: String) -> void:
 	var kinds := box.map(func(id): return "card" if id == "special" else Party.ITEMS.get(id, {}).get("kind", ""))
-	if kind in kinds or "" in kinds:  # (mod items: unknown, left alone)
+	if kind in kinds:
 		return
 	var others: Array = Party.listed_items().filter(func(k): return Party.ITEMS[k].get("kind", "") != kind)
 	var id := Party.pick_item(_rng, others)
-	if Party.ITEMS.get(id, {}).get("kind", "") != kind:
+	if Party.ITEMS.get(id, {}).get("kind", "") != kind or Party.weight(id) == 0:
 		return  # all of that kind are switched off
 	# Replace a card whose kind the box has plenty of, or else a bomb (never a
 	# Special crate, nor the only helpful item or trap).
@@ -671,7 +682,7 @@ func _ensure_kind(kind: String) -> void:
 	for i in box.size():
 		if box[i] == "special":
 			continue
-		var plenty: bool = kinds.count(kinds[i]) >= 2 or kinds[i] == "bomb"
+		var plenty: bool = kinds.count(kinds[i]) >= 2 or kinds[i] == "bomb" or kinds[i] == ""
 		if plenty and (best < 0 or kinds.count(kinds[i]) > kinds.count(kinds[best])):
 			best = i
 	if best >= 0:
@@ -732,7 +743,8 @@ func _open_card(id: String) -> String:
 		return id
 	var special := Party.pick_special(_rng)
 	if special == "" or (Party.ITEMS[special].get("bomb", false) and Party.session.items.is_empty()):
-		special = Party.pick_item(_rng)
+		var bombs := Party.listed_items().filter(func(k): return Party.ITEMS[k].get("bomb", false))
+		special = Party.pick_item(_rng, bombs if Party.session.items.is_empty() else [])
 	return special
 
 

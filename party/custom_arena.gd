@@ -29,16 +29,19 @@ func _enter_tree() -> void:
 	ctl.goal_zone = ArenaMap.goal_zone(m)
 	var area := ArenaMap.build_area(m)
 	ctl.build_area = area
+	# Robots are out past these limits: around everything in the map, even when
+	# the bounds drawn in the editor are smaller.
+	var limits := area.merge(ArenaMap.auto_bounds(m))
 	ctl.spawn_origin = ArenaMap.spawn_origin(m)
 	ctl.follow_camera = true
 	$PlayerSpawner.position = ctl.spawn_origin
 	$Goal.position = Vector2(m.goal[0], m.goal[1] - 65)
 	var cam := $Camera2D
 	cam.position = area.get_center()
-	cam.boundary_left = area.position.x - 400
-	cam.boundary_right = area.end.x + 400
-	cam.boundary_top = area.position.y - 2000
-	cam.boundary_bottom = area.end.y + 500
+	cam.boundary_left = limits.position.x - 400
+	cam.boundary_right = limits.end.x + 400
+	cam.boundary_top = limits.position.y - 2000
+	cam.boundary_bottom = limits.end.y + 500
 	$Weather.wind = m.wind
 	$Weather.meteors = m.meteors
 	set_meta("title", m.name)
