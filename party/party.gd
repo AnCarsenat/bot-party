@@ -272,6 +272,9 @@ func new_session(players: Array, choice := "") -> void:
 		session.players.sort()
 	session.bots = bots
 	session.bot_styles = styles
+	session.bot_traits = {}
+	for k in styles:
+		session.bot_traits[k] = PartyBot.roll_traits(styles[k])
 	if choice == "":
 		choice = arena_choice
 	if choice.begins_with("map:"):
@@ -450,6 +453,17 @@ func label(slot: int) -> String:
 ## How this party's bot in `slot` plays (one of PartyBot.STYLES).
 func bot_style(slot: int) -> String:
 	return str(session.get("bot_styles", {}).get(str(slot), "normal"))
+
+
+## A bot's character for the whole party (made once, kept in the save):
+## {aggro, care, greed, spite}, each 0..1. See PartyBot.roll_traits.
+func bot_traits(slot: int) -> Dictionary:
+	if not session.has("bot_traits"):
+		session.bot_traits = {}
+	var key := str(slot)
+	if not session.bot_traits.has(key):
+		session.bot_traits[key] = PartyBot.roll_traits(bot_style(slot))  # an older save
+	return session.bot_traits[key]
 
 
 ## Slot -> skill of the computer players in this party.

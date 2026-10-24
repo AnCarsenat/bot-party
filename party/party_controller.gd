@@ -34,6 +34,7 @@ var _skip_when_running := false
 ## How this party is played (Party > Rules > Mode; mods can add modes).
 var mode: PartyMode
 var trap_kills := {}   # owner slot -> kills this round
+var kills: Array = []   # this round: [victim slot, trap owner slot]
 var run_time := 0.0
 var modifier := ""
 ## Console: the rule for the next round.
@@ -801,6 +802,7 @@ func _start_countdown() -> void:
 	_sub.text = ""
 	finished.clear()
 	trap_kills.clear()
+	kills.clear()
 	for item in placed_items():
 		if item.has_method("reset_round"):
 			item.reset_round()
@@ -1082,6 +1084,8 @@ func _popup_fx(pos: Vector2, text: String, slot: int) -> void:
 
 func on_trap_kill(owner_slot: int, victim: Node) -> void:
 	var victim_slot: int = victim.get_meta("player_index", 0) + 1
+	if phase == Phase.RUN:
+		kills.append([victim_slot, owner_slot])  # bots remember who got them
 	if phase == Phase.RUN and owner_slot != 0 and owner_slot != victim_slot:
 		trap_kills[owner_slot] = trap_kills.get(owner_slot, 0) + 1
 		if slots.size() > 1:

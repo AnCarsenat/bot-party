@@ -53,6 +53,9 @@ const ODD := ["planes", "fan", "conveyor", "magnet", "balloon", "follower", "spe
 var slot := 0
 var skill: int = Skill.NORMAL
 var style := "normal"
+## Its character for the whole party (Party.bot_traits): aggro (traps for the
+## others), care (makes the way easier), greed (coins), spite (gets back at whoever got it).
+var traits := {}
 var ctl: Node  # the PartyController
 
 var _rng := RandomNumberGenerator.new()
@@ -79,6 +82,12 @@ var _coin_field := PackedInt32Array() # distance to the coin
 var _coin_for := Vector2.INF
 var _coin_to_flag := 0.0
 var _coin_mood := true     # does it fancy the coin this time
+# What happened last round, and what it means to do about it.
+var _mood := ""            # "help": make it easier (it didn't make it), "attack": make it harder, "": its usual
+var _target_slot := 0      # who it's after when attacking
+var _smart_tries := 0      # spots tried for that this placing
+var _watch_paths := {}     # (first bot, during the race) slot -> where each player went
+var _watch_out := {}       # slot -> where they went out
 var _going_coin := false
 var _coin_check := 0
 var _field_key := ""       # which arena layout it was made for
@@ -115,6 +124,14 @@ static var _budget_frame := -1
 static var _budget_used := 0
 
 
+## A character for a new bot: its style leans it one way, the rest is chance.
+static func roll_traits(for_style: String) -> Dictionary:
+	var lean: float = {"trapper": 0.8, "builder": 0.25, "chaos": 0.6}.get(for_style, 0.5)
+	var aggro := clampf(lean + randf_range(-0.2, 0.2), 0.0, 1.0)
+	return {"aggro": snappedf(aggro, 0.01), "care": snappedf(clampf(1.0 - aggro + randf_range(-0.2, 0.2), 0.0, 1.0), 0.01),
+		"greed": snappedf(randf_range(0.2, 1.0), 0.01), "spite": snappedf(randf(), 0.01)}
+
+
 func _init(for_slot := 0, bot_skill := Skill.NORMAL, bot_style := "normal") -> void:
 	slot = for_slot
 	_coin_check = 3 + slot * 3  # not all bots on the same frame
@@ -128,6 +145,8 @@ func _init(for_slot := 0, bot_skill := Skill.NORMAL, bot_style := "normal") -> v
 
 func _ready() -> void:
 	_rng.randomize()
+	if traits.is_empty():
+		traits = _party().bot_traits(slot)
 	# The keyboard keys of this slot no longer move this robot.
 	for a in ACTIONS:
 		var action := "p%d_%s" % [slot, a]
@@ -188,12 +207,20 @@ func _process(delta: float) -> void:
 	if not is_instance_valid(ctl):
 		return
 	if ctl.phase != _phase:
+		if _phase == ctl.Phase.RUN and slot == _first_bot():
+			_write_notes()
 		_phase = ctl.phase
+		if _phase == ctl.Phase.PICK:
+			_decide_mood()
+		elif _phase == ctl.Phase.COUNTDOWN:
+			_watch_paths.clear()
+			_watch_out.clear()
 		_field_key = ""  # items were placed: the arena changed
 		_plan.clear()
 		_clock = 0.0
 		_want = -1
 		_looks.clear()
+		_smart_tries = 0
 		var span: Vector2 = (PICK_TIME if _phase == ctl.Phase.PICK else PLACE_TIME)[skill]
 		_decide_at = _rng.randf_range(span.x, span.y)
 		_wait = _rng.randf_range(0.4, 0.8)
@@ -299,7 +326,31 @@ func _like(id: String) -> float:
 			like *= 2.0 if id in PLATFORMS else 0.5
 		"chaos":
 			like *= 2.2 if def.get("bomb", false) or id in ODD else 0.8
+	# What last round calls for.
+	match _mood:
+		"help":
+			if _helps(id):
+				like *= 2.0 + float(traits.care) * 2.0
+			elif _traps(id):
+				like *= 0.5
+			if def.get("bomb", false) and _my_trap() != null:
+				like *= 2.5  # blow up what got it
+		"attack":
+			if _traps(id):
+				like *= 1.5 + float(traits.aggro)
+			elif _helps(id):
+				like *= 0.6
+			if def.get("bomb", false) and _help_on(_target_path()) != null:
+				like *= 1.8  # take away what helps the one it's after
 	return like
+
+
+func _traps(id: String) -> bool:
+	return id in TRAPS or _party().ITEMS.get(id, {}).get("kind", "") == "trap"
+
+
+func _helps(id: String) -> bool:
+	return id in PLATFORMS or _party().ITEMS.get(id, {}).get("kind", "") == "help"
 
 
 func _place(delta: float) -> void:
@@ -345,6 +396,11 @@ func _flip_for(id: String) -> bool:
 func _choose_spot(id: String) -> Vector2:
 	var def: Dictionary = _party().ITEMS.get(id, {})
 	var turn: int = ctl.turns.get(slot, 0)
+	# (Not over and over: if it can't be put there, the usual way.)
+	_smart_tries += 1
+	var smart := _smart_spot(id, def, turn) if _smart_tries <= 2 else Vector2.INF
+	if smart != Vector2.INF:
+		return smart
 	if def.get("bomb", false):
 		var others: Array = ctl.placed_items().filter(func(it): return it.get_meta("owner_slot", 0) != slot)
 		if not others.is_empty():
@@ -378,7 +434,7 @@ func _choose_spot(id: String) -> Vector2:
 		elif not route.is_empty() and attempt < 50:
 			var k := int(route.size() * _rng.randf_range(span.x, span.y))
 			pos = route[k]
-			if id in TRAPS or _rng.randf() < 0.6:
+			if _traps(id) or _rng.randf() < 0.6:
 				var floor_y := _floor_below(pos)
 				if floor_y != INF:
 					pos.y = floor_y - size.y / 2.0 - offset.y
@@ -390,7 +446,7 @@ func _choose_spot(id: String) -> Vector2:
 		if ctl.can_place(id, pos, turn):
 			# Traps: better bots try more spots and keep the one that covers most
 			# of the way the racers go.
-			if not id in TRAPS or route.is_empty() or skill == Skill.EASY:
+			if not _traps(id) or route.is_empty() or skill == Skill.EASY:
 				return pos
 			var score := _coverage(id, pos, turn, route) + _rng.randf() * 0.5
 			if score > best_score:
@@ -400,6 +456,251 @@ func _choose_spot(id: String) -> Vector2:
 			if tried >= [1, 6, 24][skill]:
 				break
 	return best if best != Vector2.INF else ctl.cursor[slot]
+
+
+# --- Strategy (from what happened last round) ---------------------------------------------
+
+## The first bot watches the race: where everyone goes, where they go out.
+func _watch() -> void:
+	var frame := Engine.get_physics_frames()
+	for s in ctl.players:
+		var p = ctl.players[s]
+		if not is_instance_valid(p) or _watch_out.has(s) or p.get_meta("finished", false):
+			continue
+		if p.get_meta("eliminated", false):
+			var path: PackedVector2Array = _watch_paths.get(s, PackedVector2Array())
+			# Where it went out (falling off the bottom: where it was last seen).
+			var at: Vector2 = p.global_position
+			if not path.is_empty() and at.distance_to(path[-1]) > 400.0:
+				at = path[-1]
+			_watch_out[s] = at
+		elif frame % 12 == 0:
+			if not _watch_paths.has(s):
+				_watch_paths[s] = PackedVector2Array()
+			if _watch_paths[s].size() < 400:
+				_watch_paths[s].append(p.global_position)
+
+
+## Kept in the party (and the save) for every bot to think about.
+func _write_notes() -> void:
+	var paths := {}
+	for s in _watch_paths:
+		var flat := []
+		for v in _watch_paths[s]:
+			flat.append(roundf(v.x))
+			flat.append(roundf(v.y))
+		paths[str(s)] = flat
+	var outs := {}
+	for s in _watch_out:
+		var by := 0
+		for k in ctl.kills:
+			if int(k[0]) == int(s):
+				by = int(k[1])
+		outs[str(s)] = [roundf(_watch_out[s].x), roundf(_watch_out[s].y), by]
+	_party().session.bot_notes = {"round": int(_party().session.get("round", 0)),
+		"finished": ctl.finished.map(func(x): return int(x)), "players": ctl.slots.size(),
+		"outs": outs, "paths": paths}
+
+
+## Last round's notes, if they're about the round just played.
+func _notes() -> Dictionary:
+	var n: Dictionary = _party().session.get("bot_notes", {})
+	if n.is_empty() or int(n.get("round", -1)) != int(_party().session.get("round", 0)):
+		return {}
+	return n
+
+
+## After a round: make it easier if it didn't make it (or nobody did), harder
+## if everybody did, and go after whoever is about to win (or got it).
+func _decide_mood() -> void:
+	_mood = ""
+	_target_slot = 0
+	var n := _notes()
+	if n.is_empty() or _rng.randf() > [0.45, 0.8, 1.0][skill]:
+		return  # round one, or an easy bot not thinking it through
+	var fin: Array = n.get("finished", []).map(func(x): return int(x))
+	var made := slot in fin
+	var aggro: float = traits.get("aggro", 0.5)
+	var care: float = traits.get("care", 0.5)
+	if fin.is_empty():
+		_mood = "help"
+	elif fin.size() >= int(n.get("players", 0)):
+		_mood = "attack"
+	elif not made:
+		_mood = "help" if _rng.randf() < 0.35 + care * 0.6 else "attack"
+	elif _rng.randf() < 0.3 + aggro * 0.6:
+		_mood = "attack"
+	# Whoever leads (someone close to winning: stop them).
+	var leader := 0
+	var lead := 0
+	for s in ctl.slots:
+		if s != slot and _party().score(s) > lead:
+			lead = _party().score(s)
+			leader = s
+	if leader != 0 and lead >= _party().target_score() - _party().POINTS_FINISH - _party().POINTS_FIRST and _mood != "help":
+		_mood = "attack"
+	if _mood == "attack":
+		_target_slot = leader
+	# Spiteful bots go after whoever got them.
+	var out = n.get("outs", {}).get(str(slot))
+	if out != null and int(out[2]) != 0 and int(out[2]) != slot and _rng.randf() < float(traits.get("spite", 0.5)):
+		_target_slot = int(out[2])
+		if _mood == "":
+			_mood = "attack"
+	if _mood == "attack" and _target_slot == 0:
+		_target_slot = fin[_rng.randi() % fin.size()] if not fin.is_empty() else 0
+
+
+func _path_of(s: int) -> Array:
+	var flat: Array = _notes().get("paths", {}).get(str(s), [])
+	var out := []
+	for i in range(0, flat.size() - 1, 2):
+		out.append(Vector2(flat[i], flat[i + 1]))
+	return out
+
+
+## Where the one it's after went (or everyone who made it).
+func _target_path() -> Array:
+	var path := _path_of(_target_slot) if _target_slot != 0 else []
+	if path.is_empty():
+		for s in _notes().get("finished", []):
+			if int(s) != slot:
+				path += _path_of(int(s))
+	return path
+
+
+## The trap that got it last round (still there), or null.
+func _my_trap() -> Node:
+	var out = _notes().get("outs", {}).get(str(slot))
+	if out == null:
+		return null
+	return _item_near(Vector2(out[0], out[1]), true, 220.0)
+
+
+func _item_near(at: Vector2, trap: bool, within: float) -> Node:
+	var best: Node = null
+	for it in ctl.placed_items():
+		if not is_instance_valid(it):
+			continue
+		var id: String = it.get_meta("record", {}).get("id", "")
+		if (_traps(id) if trap else _helps(id)) and it.global_position.distance_to(at) < within:
+			within = it.global_position.distance_to(at)
+			best = it
+	return best
+
+
+## Someone else's helpful item on `path` (the one it helps most), or null.
+func _help_on(path: Array) -> Node:
+	if path.is_empty():
+		return null
+	var best: Node = null
+	var most := 0.0
+	for it in ctl.placed_items():
+		if not is_instance_valid(it) or it.get_meta("owner_slot", 0) == slot:
+			continue
+		var rec: Dictionary = it.get_meta("record", {})
+		if not _helps(rec.get("id", "")):
+			continue
+		var n := _coverage(rec.id, it.global_position, int(rec.get("rot", 0)), path)
+		if n > most:
+			most = n
+			best = it
+	return best
+
+
+## A spot chosen for what happened last round, or Vector2.INF (then the usual way).
+func _smart_spot(id: String, def: Dictionary, turn: int) -> Vector2:
+	if _mood == "" or _notes().is_empty():
+		return Vector2.INF
+	if _mood == "help":
+		var trap := _my_trap()
+		if def.get("bomb", false):
+			return trap.global_position if trap else Vector2.INF
+		if _traps(id):
+			return _out_of_the_way(id, turn)  # nobody needs it harder now
+		if not _helps(id):
+			return Vector2.INF
+		var anchors := []
+		var mine := _path_of(slot)
+		var out = _notes().get("outs", {}).get(str(slot))
+		if trap:
+			# Caught by a trap: a way over it.
+			for dx in [0.0, -90.0, 90.0]:
+				anchors.append(trap.global_position + Vector2(dx, -150))
+		elif not mine.is_empty():
+			# Fell (or got stuck): from the last place it stood, the ledge made
+			# longer towards the flag, then a step up.
+			var ahead := signf(ctl._goal.global_position.x - mine[-1].x)
+			var top: float = def.get("size", Vector2(64, 64)).y / 2.0 - def.get("offset", Vector2.ZERO).y
+			for k in range(mine.size() - 1, -1, -1):
+				var fy := _floor_below(mine[k])
+				if fy != INF and fy - mine[k].y < 160.0:  # over the ground (standing, or a hop)
+					if out == null:
+						anchors.append(mine[k] + Vector2(ahead * 40.0, -110))  # stuck: a step up
+					anchors.append(Vector2(mine[k].x + ahead * 110.0, fy + top))
+					anchors.append(Vector2(mine[k].x + ahead * 230.0, fy + top))
+					break
+		if anchors.is_empty() and out != null:
+			anchors.append(Vector2(out[0], out[1]) + Vector2(0, -60))
+		for a in anchors:
+			for r in [0.0, 40.0, 80.0, 130.0]:
+				for k in (1 if r == 0.0 else 8):
+					var pos: Vector2 = a + Vector2(r, 0).rotated(k * TAU / 8.0)
+					if ctl.can_place(id, pos, turn):
+						return pos
+		return Vector2.INF
+	# Attack: on the way the one it's after went.
+	var path := _target_path()
+	if path.size() < 4:
+		return Vector2.INF
+	if def.get("bomb", false):
+		var it := _help_on(path)
+		return it.global_position if it else Vector2.INF
+	if not _traps(id):
+		return Vector2.INF
+	var mine := _path_of(slot)
+	var size: Vector2 = def.get("size", Vector2(64, 64))
+	var offset: Vector2 = def.get("offset", Vector2.ZERO)
+	var best := Vector2.INF
+	var best_score := 0.0
+	var tries := 0
+	for attempt in 80:
+		var pos: Vector2 = path[int(path.size() * _rng.randf_range(0.1, 0.97))]
+		var fy := _floor_below(pos)
+		if fy != INF and fy - pos.y < 260.0:
+			pos.y = fy - size.y / 2.0 - offset.y
+		if not ctl.can_place(id, pos, turn):
+			continue
+		# Right where they went; less so where it goes itself.
+		var score := _coverage(id, pos, turn, path) - 0.4 * _coverage(id, pos, turn, mine) + _rng.randf() * 0.5
+		if score > best_score:
+			best_score = score
+			best = pos
+		tries += 1
+		if tries >= [3, 10, 24][skill]:
+			break
+	return best
+
+
+## A trap somewhere nobody went last round (when nobody needs it harder).
+func _out_of_the_way(id: String, turn: int) -> Vector2:
+	var all := []
+	for s in _notes().get("paths", {}):
+		all += _path_of(int(s))
+	var area: Rect2 = ctl.build_area
+	var best := Vector2.INF
+	var least := INF
+	for attempt in 40:
+		var pos := Vector2(_rng.randf_range(area.position.x, area.end.x), _rng.randf_range(area.position.y, area.end.y))
+		if not ctl.can_place(id, pos, turn):
+			continue
+		var n := _coverage(id, pos, turn, all)
+		if n < least:
+			least = n
+			best = pos
+			if n == 0.0:
+				break
+	return best
 
 
 ## How much of the route a trap at `pos` sits on (route points inside its
@@ -440,6 +741,8 @@ func _physics_process(_delta: float) -> void:
 		_make_field()  # ready before the race (the others share it)
 	if ctl.phase != ctl.Phase.RUN:
 		return
+	if slot == _first_bot():
+		_watch()
 	var p = ctl.players.get(slot)
 	if not is_instance_valid(p) or p.get_meta("eliminated", false) or p.get_meta("finished", false) or not p.is_physics_processing():
 		if not _held.is_empty():
@@ -1012,7 +1315,11 @@ func _make_field() -> void:
 				base[y * w + x] = 1
 		_base = {base_key: base}
 	var free: PackedByteArray = _base[base_key].duplicate()
-	for item in ctl.placed_items():
+	var movers: Array = ctl.placed_items()
+	for n in ctl.get_parent().find_children("*", "CollisionObject2D", true, false):
+		if n.collision_layer & Layers.CRATES and _item_of(n) == null:
+			movers.append(n)
+	for item in movers:
 		if not is_instance_valid(item):
 			continue
 		var r := _item_rect(item).grow(BODY.x)
@@ -1157,8 +1464,8 @@ func _grid(arr: PackedInt32Array, c: Vector2i) -> float:
 func _solid(hits: Array, arena_only := false) -> bool:
 	for hit in hits:
 		var body = hit.collider
-		if arena_only and body is Node and _item_of(body) != null:
-			continue  # an item: looked at separately
+		if arena_only and body is Node and (_item_of(body) != null or (body is CollisionObject2D and body.collision_layer & Layers.CRATES)):
+			continue  # an item or a crate (they move): looked at separately
 		if body is CollisionObject2D:
 			var owner_id: int = body.shape_find_owner(hit.shape)
 			if body.is_shape_owner_one_way_collision_enabled(owner_id):
@@ -1208,11 +1515,12 @@ func _think_coin(p: Node) -> void:
 				_shared_coin[key] = _dijkstra(at)
 			_coin_field = _shared_coin[key]
 			_coin_for = at
-			_coin_mood = _rng.randf() < [0.6, 0.8, 0.9][skill]  # not every time
+			# Greedy bots nearly always go for it, others now and then.
+			_coin_mood = _rng.randf() < float(traits.get("greed", 0.6)) * [0.8, 1.0, 1.1][skill]
 		_coin_to_flag = _field_at(_field, at, ctl._goal.global_position)
 		var direct := _field_at(_field, p.global_position, ctl._goal.global_position)
 		var detour := _field_at(_coin_field, p.global_position, at) + _coin_to_flag - direct
-		var limit: float = [10.0, 18.0, 28.0][skill] * (1.5 if style == "chaos" else 1.0)
+		var limit: float = [10.0, 18.0, 28.0][skill] * (0.6 + float(traits.get("greed", 0.6)))
 		if _going_coin and _stuck > 3.0:
 			_coin_mood = false  # can't get to it: forget it
 		want = _coin_mood and detour < limit
