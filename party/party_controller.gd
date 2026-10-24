@@ -482,12 +482,14 @@ func _explode_fx(pos: Vector2, radius: float) -> void:
 ## its path. Most of them are gone; the rest are spat out somewhere around where
 ## it stops, any which way.
 func _black_hole(pos: Vector2, radius: float) -> void:
+	_busy += 1  # the race waits until it's done
 	var end := (pos + Vector2.from_angle(_rng.randf() * TAU) * BLACK_HOLE_DRIFT * BLACK_HOLE_TIME) \
 		.clamp(build_area.position, build_area.end)
 	var victims := _items_near_path(pos, end, radius)
 	_black_hole_fx(pos, end, radius)
 	NetCheck.event(self, "_black_hole_fx", [pos, end, radius])
 	await get_tree().create_timer(BLACK_HOLE_TIME).timeout
+	_busy -= 1
 	if not is_inside_tree():
 		return
 	for item in victims:
@@ -503,6 +505,9 @@ func _black_hole(pos: Vector2, radius: float) -> void:
 
 
 const BLACK_HOLE_TIME := 3.0
+## Things still happening after the last item is placed (black holes): the
+## countdown waits for them.
+var _busy := 0
 const BLACK_HOLE_DRIFT := 110.0  # pixels per second
 const BLACK_HOLE_SPIT := 0.3     # share of what it catches that comes back out
 
@@ -953,7 +958,7 @@ func _process_place(delta: float) -> void:
 			continue
 		all_done = false
 		_steer_ghost(slot, g, delta)
-	if all_done:
+	if all_done and _busy == 0:
 		_start_countdown()
 
 
