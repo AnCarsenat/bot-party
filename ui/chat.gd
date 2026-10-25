@@ -1,17 +1,15 @@
 extends CanvasLayer
-## Chat, and the console's commands: type !help.
-## C or / opens it (online), the key left of 1 or F1 opens it with a "!" ready
-## (also offline). Enter sends, Esc closes, Up / Down: what you typed before,
-## Tab: finish a command. Messages show at the bottom left for a while: small
-## and see-through in the levels, under the boxes in the online lobby. In an
-## online party a faint bar invites you to chat. While typing, this computer's
-## players stand still (net.gd); offline, the game pauses.
+## Online chat (the console, for commands, is separate: console.gd).
+## C or / opens it, Enter sends, Esc closes, Up / Down: what you typed before.
+## Messages show at the bottom left for a while: small and see-through in the
+## levels, under the boxes in the online lobby. In an online party a faint bar
+## invites you to chat. While typing, this computer's players stand still (net.gd).
 
 const SHOW_FOR := 8.0     # seconds a message stays when the chat is closed
 const KEEP := 50
 const OPEN_KEYS := [KEY_C, KEY_SLASH]
 
-var _lines: Array = []    # [who ("" = the game, "*" = only here, bbcode), text, time]
+var _lines: Array = []    # [who ("" = the game), text, time]
 var _panel: Control
 var _scroll: ScrollContainer
 var _list: VBoxContainer
@@ -22,7 +20,6 @@ var _docked := false
 var _dock_rect := Rect2()
 var _history: Array[String] = []
 var _history_pos := 0
-var _paused_by_us := false
 
 
 func _ready() -> void:
@@ -43,15 +40,15 @@ func _ready() -> void:
 	_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_scroll.add_child(_list)
 	_input = LineEdit.new()
-	_input.placeholder_text = "Say something, or !help  (Enter: send, Esc: close)"
+	_input.placeholder_text = "Say something  (Enter: send, Esc: close)"
 	_input.max_length = 200
 	_input.add_theme_font_override("font", UiTheme.FONT_MEDIUM)
-	_input.add_theme_font_size_override("font_size", 22)
+	_input.add_theme_font_size_override("font_size", 18)
 	var box := StyleBoxFlat.new()
 	box.bg_color = Color.WHITE
 	box.border_color = UiTheme.INK
 	box.set_border_width_all(3)
-	box.set_content_margin_all(6)
+	box.set_content_margin_all(4)
 	_input.add_theme_stylebox_override("normal", box)
 	_input.add_theme_stylebox_override("focus", box)
 	_input.add_theme_color_override("font_color", UiTheme.INK)
@@ -65,7 +62,7 @@ func _ready() -> void:
 	_bar = Label.new()
 	_bar.text = "C  Chat..."
 	_bar.add_theme_font_override("font", UiTheme.FONT_MEDIUM)
-	_bar.add_theme_font_size_override("font_size", 18)
+	_bar.add_theme_font_size_override("font_size", 16)
 	_bar.add_theme_color_override("font_color", Color(UiTheme.INK, 0.6))
 	var faint := StyleBoxFlat.new()
 	faint.bg_color = Color(1, 1, 1, 0.35)
@@ -92,14 +89,16 @@ func dock(rect) -> void:
 
 func _layout() -> void:
 	var screen := get_viewport().get_visible_rect().size
-	var r := _dock_rect if _docked else Rect2(16, screen.y - (430 if is_open() else 300) - 46, 560, 430 if is_open() else 300)
+	# Small: a corner of the screen (a bit taller while typing).
+	var h := 230.0 if is_open() else 150.0
+	var r := _dock_rect if _docked else Rect2(16, screen.y - h - 46, 380, h)
 	_panel.position = r.position
 	_panel.size = r.size
-	var input_h := 40.0
+	var input_h := 32.0
 	_input.position = Vector2(0, r.size.y - input_h)
 	_input.size = Vector2(r.size.x, input_h)
-	_bar.position = Vector2(0, r.size.y - 32)
-	_bar.size = Vector2(150, 30)
+	_bar.position = Vector2(0, r.size.y - 28)
+	_bar.size = Vector2(120, 26)
 	var bottom := r.size.y - (input_h + 6 if is_open() or _bar.visible else 0.0)
 	_scroll.position = Vector2.ZERO
 	_scroll.size = Vector2(r.size.x, maxf(0.0, bottom))
@@ -109,20 +108,17 @@ func is_open() -> bool:
 	return _input.visible
 
 
-## Opens the chat (`start`: text already typed, "!" for a command).
+## Opens the chat (online), `start` already typed.
 func open(start := "") -> void:
-	if is_open():
+	var net := get_node("/root/Net")
+	if is_open() or not net.is_online():
 		return
 	_input.show()
 	_input.text = start
 	_input.caret_column = start.length()
 	_input.grab_focus()
 	_history_pos = _history.size()
-	var net := get_node("/root/Net")
 	net.typing = true
-	if not net.is_online() and not get_tree().paused:
-		get_tree().paused = true  # offline: commands with the game stopped
-		_paused_by_us = true
 	_layout()
 	_shown = ""
 
@@ -135,9 +131,6 @@ func close() -> void:
 	var net := get_node_or_null("/root/Net")
 	if net:
 		net.typing = false
-	if _paused_by_us:
-		get_tree().paused = false
-		_paused_by_us = false
 	_layout()
 	_shown = ""
 
@@ -148,11 +141,6 @@ func add(who: String, text: String) -> void:
 	if _lines.size() > KEEP:
 		_lines.pop_front()
 	_shown = ""
-
-
-## A line only this computer sees (command output; may use bbcode).
-func add_local(text: String) -> void:
-	add("*", text)
 
 
 func clear() -> void:
@@ -166,21 +154,9 @@ func _now() -> float:
 
 func _send(text: String) -> void:
 	text = text.strip_edges()
-	if text != "" and text != "!":
+	if text != "":
 		_history.append(text)
-	var net := get_node("/root/Net")
-	if text.begins_with("!"):
-		var cmd := text.substr(1).strip_edges()
-		if cmd != "":
-			add_local("[color=#2f7a43]> !%s[/color]" % cmd.replace("[", "[lb]"))
-			var console := get_node_or_null("/root/Console")
-			if console:
-				console.run(cmd)
-	elif text != "":
-		if net.is_online():
-			net.chat(text)
-		else:
-			add_local("[color=#5c5a68]Nobody to talk to offline. Commands start with ! (try !help).[/color]")
+		get_node("/root/Net").chat(text)
 	close()
 
 
@@ -194,11 +170,6 @@ func _on_key(e: InputEvent) -> void:
 			_recall(-1)
 		KEY_DOWN:
 			_recall(1)
-		KEY_TAB:
-			var console := get_node_or_null("/root/Console")
-			if console and _input.text.begins_with("!"):
-				_input.text = "!" + console.complete(_input.text.substr(1))
-				_input.caret_column = _input.text.length()
 		_:
 			return
 	_input.accept_event()
@@ -216,6 +187,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo) or is_open():
 		return
 	if not get_node("/root/Net").is_online():
+		return
+	var console := get_node_or_null("/root/Console")
+	if console and console.is_open():
 		return
 	var k: Key = event.physical_keycode if event.physical_keycode != 0 else event.keycode
 	if k in OPEN_KEYS and not _key_taken(k):
@@ -250,7 +224,7 @@ func _process(_d: float) -> void:
 		_layout()
 	var now := _now()
 	var show := []
-	var keep := 3 if _docked else (40 if is_open() else 8)
+	var keep := 3 if _docked else (12 if is_open() else 5)
 	for l in _lines.slice(-keep):
 		var age: float = now - l[2]
 		if is_open() or age < SHOW_FOR:
@@ -261,8 +235,8 @@ func _process(_d: float) -> void:
 	_shown = key
 	for c in _list.get_children():
 		c.queue_free()
-	var size := 19 if _docked else (16 if in_level and not is_open() else 20)
-	var see_through := 0.8 if in_level and not is_open() else 1.0
+	var size := 19 if _docked else (15 if in_level and not is_open() else 17)
+	var see_through := 0.75 if in_level and not is_open() else 1.0
 	for s in show:
 		var l: Array = s[0]
 		var row := RichTextLabel.new()
@@ -279,9 +253,7 @@ func _process(_d: float) -> void:
 		row.add_theme_color_override("font_outline_color", UiTheme.MARBLE)
 		row.add_theme_constant_override("outline_size", 5)
 		var who := str(l[0])
-		if who == "*":
-			row.text = str(l[1])  # our own command output (bbcode)
-		elif who == "":
+		if who == "":
 			row.text = "[color=#5c5a68]%s[/color]" % str(l[1]).replace("[", "[lb]")
 		else:
 			row.text = "[b]%s:[/b] %s" % [who.replace("[", "[lb]"), str(l[1]).replace("[", "[lb]")]

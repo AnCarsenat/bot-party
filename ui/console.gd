@@ -1,9 +1,9 @@
 extends CanvasLayer
-## Autoload "Console": commands for testing and fun, typed in the chat with a
-## ! in front (!help). The key left of 1 (` or ² on AZERTY) or F1 opens the chat
-## with the ! ready. Up / Down: history. Tab: complete. Esc: close.
-## Offline, the game pauses while the chat is open. Online, only the host can
-## change the game (anyone can look things up).
+## Autoload "Console": commands for testing and fun.
+## Open / close with the key left of 1 (` or ² on AZERTY) or F1. Type "help".
+## Up / Down: history. Tab: complete. Esc: close.
+## Offline, the game pauses while it's open. Online, only the host can change the
+## game (clients can chat with "say", and look things up).
 
 const TOGGLE_KEYS := [KEY_QUOTELEFT, KEY_F1]
 const MAX_LINES := 300
@@ -25,7 +25,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_build()
 	_register_all()
-	_log.append_text("[b]Bot Party console[/b]. Type [color=#6cba7c]!help[/color] in the chat.\n")
+	print_line("[b]Bot Party console[/b]. Type [color=#6cba7c]help[/color].")
 
 
 # --- UI ------------------------------------------------------------------------
@@ -94,27 +94,22 @@ func _build() -> void:
 
 
 func is_open() -> bool:
-	return _chat() != null and _chat().is_open()
+	return _panel.visible
 
 
-## The console is the chat now: opening it opens the chat with "!" typed.
 func toggle(open: bool) -> void:
-	var chat := _chat()
-	if chat == null:
-		return
+	_panel.visible = open
 	if open:
-		chat.open("!")
+		_line.grab_focus()
+		_line.clear()
+		if not Net.is_online() and not get_tree().paused:
+			get_tree().paused = true
+			_paused_by_us = true
 	else:
-		chat.close()
-
-
-func _chat() -> Node:
-	return get_node_or_null("/root/Chat")
-
-
-func _clear_chat() -> void:
-	if _chat():
-		_chat().clear()
+		_line.release_focus()
+		if _paused_by_us:
+			get_tree().paused = false
+			_paused_by_us = false
 
 
 func _input(event: InputEvent) -> void:
@@ -124,7 +119,9 @@ func _input(event: InputEvent) -> void:
 		if event.physical_keycode in TOGGLE_KEYS or event.keycode in TOGGLE_KEYS:
 			toggle(not is_open())
 			get_viewport().set_input_as_handled()
-
+		elif is_open() and event.keycode == KEY_ESCAPE:
+			toggle(false)
+			get_viewport().set_input_as_handled()
 
 
 func _on_input_key(e: InputEvent) -> void:
@@ -151,23 +148,16 @@ func _recall(step: int) -> void:
 
 
 func _complete() -> void:
-	_line.text = complete(_line.text)
-	_line.caret_column = _line.text.length()
-
-
-## Tab in the chat: the command line `text` (no "!") with its last word finished
-## (several possible: they're listed).
-func complete(text: String) -> String:
-	var words := text.split(" ")
+	var words := _line.text.split(" ")
 	var last := words[-1]
 	var pool: Array = _commands.keys() if words.size() == 1 else Party.ITEMS.keys() + Party.MODIFIERS.keys() + ["all", "left", "right", "off"]
 	var hits := pool.filter(func(w): return str(w).begins_with(last))
 	if hits.size() == 1:
 		words[-1] = hits[0]
-		return " ".join(words) + " "
+		_line.text = " ".join(words) + " "
+		_line.caret_column = _line.text.length()
 	elif hits.size() > 1:
 		print_line(" ".join(hits))
-	return text
 
 
 func _process(_d: float) -> void:
@@ -188,16 +178,11 @@ func print_line(text: String) -> void:
 	_log.append_text(text + "\n")
 	if _log.get_line_count() > MAX_LINES:
 		_log.remove_paragraph(0)
-	var chat := _chat()
-	if chat:
-		chat.add_local(text)  # shown in the chat (only here)
 
 
-## Short message at the bottom left, for a few seconds (in the chat).
+## Short message at the bottom left, for a few seconds (and in the log).
 func toast(text: String) -> void:
 	print_line(text)
-	if _chat():
-		return
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", 20)
@@ -233,7 +218,7 @@ func run(text: String) -> String:
 	var name := parts[0].to_lower()
 	var args := parts.slice(1)
 	if not _commands.has(name):
-		return _say("Unknown command \"%s\". Type !help." % name)
+		return _say("Unknown command \"%s\". Type help." % name)
 	var c: Dictionary = _commands[name]
 	if c.host and Net.is_client():
 		return _say("Only the host can do that online.")
@@ -296,14 +281,14 @@ func _register_all() -> void:
 	_add("help", "help [command]", "List commands, or explain one.", func(a):
 		if a.size() > 0 and _commands.has(a[0]):
 			var c: Dictionary = _commands[a[0]]
-			return "!%s\n  %s" % [c.usage, c.help]
+			return "%s\n  %s" % [c.usage, c.help]
 		var names := _commands.keys()
 		names.sort()
 		var lines := []
 		for n in names:
-			lines.append("[color=#2f7a43]!%s[/color]  %s" % [_commands[n].usage, _commands[n].help])
+			lines.append("[color=#6cba7c]%s[/color]  %s" % [_commands[n].usage, _commands[n].help])
 		return "\n".join(lines))
-	_add("clear", "clear", "Clear the chat.", func(_a): _log.clear(); _clear_chat(); return "")
+	_add("clear", "clear", "Clear this log.", func(_a): _log.clear(); return "")
 	_add("fps", "fps", "Show / hide FPS (and ping online).", func(_a): _fps.visible = not _fps.visible; return "")
 	_add("keys", "keys", "Key tester: every player's keys light up when the game receives them.", func(_a):
 		_keys.visible = not _keys.visible
