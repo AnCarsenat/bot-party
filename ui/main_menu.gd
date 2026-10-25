@@ -6,7 +6,7 @@ extends Control
 ## "Players" is the lobby: each player presses their own jump key to join.
 
 const TITLE := "Bot Party"
-const VERSION := "v0.32"
+const VERSION := "v0.33"
 const NAV_REPEAT := 0.16  # seconds between moves when a pad stick is held
 const LIST_TOP := 24.0
 const ROW_STEP := 66.0     # row height + separation
