@@ -275,7 +275,14 @@ func net_apply(d: Dictionary) -> void:
 	if d.has("box"):
 		box.assign(d.box[0])
 		picks = d.box[1]
+		var keep := {}
+		var now := Time.get_ticks_msec()
+		for slot in _own_pick_until:
+			if _own_pick_until[slot] > now and cursors.has(slot):
+				keep[slot] = cursors[slot]  # we just moved it: the host's news is older
 		cursors = d.box[2]
+		for slot in keep:
+			cursors[slot] = keep[slot]
 		if phase == Phase.PICK:
 			_update_box()
 	if d.has("ghosts"):
@@ -295,6 +302,54 @@ func net_apply(d: Dictionary) -> void:
 		_last_scoreboard = d.sb
 		if not d.sb.is_empty():
 			_show_scoreboard(d.sb[0], d.sb[1])
+
+
+# --- Online client: our own cursors move here right away ---------------------------
+# (the host still decides: it takes where we put our cursor, and our presses).
+
+var _own_cursor := {}      # slot -> where our ghost's cursor is (place phase)
+var _own_pick_until := {}  # slot -> until when our card cursor is ours (pick phase)
+var _remote_cursor := {}   # host: slots whose cursor their client moves
+
+
+func _client_predict(delta: float) -> void:
+	var net := get_tree().root.get_node("Net")
+	var mine: Dictionary = net.my_slots()
+	var now := Time.get_ticks_msec()
+	for slot in mine:
+		if phase == Phase.PICK and not picks.has(slot) and cursors.has(slot):
+			var step := -1 if _pressed(slot, "move_left") else (1 if _pressed(slot, "move_right") else 0)
+			if step != 0:
+				cursors[slot] = _free_index(cursors[slot], step)
+				_own_pick_until[slot] = now + net.round_trip_ms() + 250
+				_update_box()
+		var g = ghosts.get(slot)
+		if g == null or not is_instance_valid(g):
+			_own_cursor.erase(slot)
+			continue
+		var p := "p%d_" % slot
+		var dir := Vector2(Input.get_axis(p + "move_left", p + "move_right"), Input.get_axis(p + "move_up", p + "move_down"))
+		var was: Vector2 = _own_cursor.get(slot, cursor.get(slot, g.global_position))
+		var now_at := (was + dir * ghost_speed * delta).clamp(build_area.position, build_area.end)
+		_own_cursor[slot] = now_at
+		cursor[slot] = now_at
+		_snap(slot, g)
+		var ok := can_place(g.get_meta("item_id"), g.global_position, turns.get(slot, 0))
+		g.modulate = Color(1, 1, 1, 0.85) if ok else Color(1, 0.35, 0.35, 0.6)
+		if now_at != was:
+			_cursor_up.rpc_id(1, slot, now_at)
+
+
+@rpc("any_peer", "call_remote", "unreliable_ordered")
+func _cursor_up(slot: int, at: Vector2) -> void:
+	var net := get_tree().root.get_node("Net")
+	if not net.is_host():
+		return
+	var from := multiplayer.get_remote_sender_id()
+	for r in net.roster:
+		if int(r.slot) == slot and int(r.peer) == from:
+			cursor[slot] = at.clamp(build_area.position, build_area.end)
+			_remote_cursor[slot] = true
 
 
 ## Client: same placed items as the host (by uid).
@@ -326,12 +381,15 @@ func _sync_ghosts(list: Array) -> void:
 			g = _make_ghost(e[1], slot)
 			_items.add_child(g)
 			ghosts[slot] = g
+			_own_cursor.erase(slot)
 			if follow_camera:
 				g.add_to_group("camera_follow")
-		g.global_position = e[2]
 		turns[slot] = e[3]
 		mirrors[slot] = e[4]
 		orient(g, e[3], e[4])
+		if _own_cursor.has(slot):
+			continue  # ours: moved here (_client_predict)
+		g.global_position = e[2]
 		var m = get_parent().get_node_or_null(e[5]) if e[5] != "" else null
 		if m:
 			snapped[slot] = m
@@ -917,6 +975,7 @@ func _start_score() -> void:
 func _process(delta: float) -> void:
 	_update_ghost_tags()
 	if NetCheck.client(self):
+		_client_predict(delta)  # our own cursors answer at once
 		return  # online: the host runs the rounds
 	match phase:
 		Phase.PICK: _process_pick()
@@ -992,7 +1051,8 @@ func _process_extra_ghosts(delta: float) -> void:
 func _steer_ghost(slot: int, g: Node2D, delta: float) -> void:
 		var p := "p%d_" % slot
 		var dir := Vector2(Input.get_axis(p + "move_left", p + "move_right"), Input.get_axis(p + "move_up", p + "move_down"))
-		cursor[slot] = (cursor[slot] + dir * ghost_speed * delta).clamp(build_area.position, build_area.end)
+		if not _remote_cursor.has(slot):  # (online: that client moves it)
+			cursor[slot] = (cursor[slot] + dir * ghost_speed * delta).clamp(build_area.position, build_area.end)
 		_snap(slot, g)
 		if _pressed(slot, "action_2"):
 			turns[slot] = (turns[slot] + 1) % 4

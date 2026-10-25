@@ -204,7 +204,7 @@ func _show(screen: String, keep_index := false) -> void:
 		"party":
 			_items.append({"text": "New party", "on_accept": func(): _start(func(): Party.new_game()),
 				"info": "First to %d wins." % Party.rules.target})
-			if Party.has_save():
+			if Party.has_save() and not Net.is_online():
 				_items.append({"text": "Continue", "on_accept": func(): _start(func(): Party.continue_game()), "info": Party.describe_save()})
 			_items.append({"text": "Arena", "info": "Left / right: where new parties are played.\nYour own maps are listed too.",
 				"value": func(): return "< %s >" % Party.arena_choice_name().left(12),
@@ -304,7 +304,8 @@ func _show(screen: String, keep_index := false) -> void:
 			if Net.is_host():
 				_items = [
 					{"text": "Campaign", "on_accept": func(): _show("campaign")},
-					{"text": "Party", "on_accept": func(): Party.new_game()},
+					{"text": "Party", "on_accept": func(): _show("party"),
+						"info": "Start a party, and set it up first if you like (arena, rules, items): like playing at home."},
 				]
 				# The others' computers: kick or ban them.
 				for peer in Net.computers:
@@ -786,7 +787,11 @@ func _cycle_arena(step: int) -> void:
 
 func _start(action: Callable) -> void:
 	if GameState.joined.is_empty():
-		_show("players")
+		if Net.is_online():
+			_show("online_lobby")
+			_hint.text = "Nobody has joined yet: Jump in your box"
+		else:
+			_show("players")
 		return
 	action.call()
 
@@ -809,6 +814,12 @@ func _back() -> void:
 		_show({"party_items": "party", "party_rules": "party", "mods": "settings", "controls": "settings"}[_screen])
 		for i in _items.size():
 			if _items[i].text == text:
+				_select(i)
+		return
+	if _screen == "party" and Net.is_online():
+		_show("online_lobby")
+		for i in _items.size():
+			if _items[i].text == "Party":
 				_select(i)
 		return
 	var back_to := {"campaign": 0, "party": 1, "online": 2, "players": 3, "settings": 4}
