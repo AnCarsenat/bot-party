@@ -74,6 +74,9 @@ func _ready() -> void:
 	if Party.session.is_empty() and not Party.load_save():
 		Party.new_session(GameState.joined)  # arena started directly from the editor
 	slots = Party.players()
+	var net := get_tree().root.get_node_or_null("Net")
+	if net and net.is_host():
+		net.roster_changed.connect(_on_roster_changed)
 	mode = Party.make_mode(str(Party.rule("mode")))
 	mode.setup(self)
 	for b in Party.bots():
@@ -304,6 +307,39 @@ func net_apply(d: Dictionary) -> void:
 			_show_scoreboard(d.sb[0], d.sb[1])
 
 
+## Host: someone left (or was sent out) in the middle of a party: their places
+## go, so picking and placing don't wait for them.
+func _on_roster_changed() -> void:
+	if not is_inside_tree():
+		return
+	var net := get_tree().root.get_node_or_null("Net")
+	if net == null or not net.is_host():
+		return  # (closing the game: nothing to tidy)
+	var live := []
+	for r in net.roster:
+		live.append(int(r.slot))
+	var gone := slots.filter(func(s): return not s in live)
+	if gone.is_empty():
+		return
+	for s in gone:
+		slots.erase(s)
+		cursors.erase(s)
+		picks.erase(s)
+		cursor.erase(s)
+		snapped.erase(s)
+		_remote_cursor.erase(s)
+		var g = ghosts.get(s)
+		if g != null and is_instance_valid(g):
+			g.queue_free()
+		ghosts.erase(s)
+		players.erase(s)
+		Party.session.players = Party.session.get("players", []).filter(func(x): return int(x) != s)
+	if phase == Phase.PICK:
+		_update_box()
+		if picks.size() >= slots.size() and not slots.is_empty():
+			_start_place()
+
+
 # --- Online client: our own cursors move here right away ---------------------------
 # (the host still decides: it takes where we put our cursor, and our presses).
 
@@ -337,7 +373,32 @@ func _client_predict(delta: float) -> void:
 		var ok := can_place(g.get_meta("item_id"), g.global_position, turns.get(slot, 0))
 		g.modulate = Color(1, 1, 1, 0.85) if ok else Color(1, 0.35, 0.35, 0.6)
 		if now_at != was:
-			_cursor_up.rpc_id(1, slot, now_at)
+			_cursor_moved[slot] = true
+
+
+## Client: our cursors go to the host in the physics step, before net.gd sends
+## our keys (it runs last): with a press, reliably, so the host has the
+## cursor where we see it when the press gets there.
+var _cursor_moved := {}
+var _place_held := {}
+func _physics_process(_delta: float) -> void:
+	if not NetCheck.client(self):
+		return
+	var mine: Dictionary = get_tree().root.get_node("Net").my_slots()
+	for slot in _own_cursor:
+		# Our own key for it (what net.gd is about to send).
+		var held := Input.is_action_pressed("k%d_action_1" % mine.get(slot, slot))
+		if held and not _place_held.get(slot, false):
+			_cursor_final.rpc_id(1, slot, _own_cursor[slot])
+		elif _cursor_moved.get(slot, false):
+			_cursor_up.rpc_id(1, slot, _own_cursor[slot])
+		_place_held[slot] = held
+		_cursor_moved[slot] = false
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _cursor_final(slot: int, at: Vector2) -> void:
+	_cursor_up(slot, at)
 
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")

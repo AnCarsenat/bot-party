@@ -190,6 +190,9 @@ func _register(port: int) -> void:
 	var info := {"name": server_name, "port": port, "max": GameState.MAX_PLAYERS,
 		"players": roster.size(), "mode": _mode_text(), "lan_ip": _lan_ip(), "names": room_names()}
 	_lobby.register(lobby_url, info, func(ok: bool, data: Dictionary):
+		if ok and not is_host():
+			_lobby.close()  # closed the game before the list answered: unlist it
+			return
 		if not ok or not is_host():
 			status.emit("Server list unreachable: only direct connections")
 			return
@@ -308,6 +311,8 @@ func _request_leave(local_slot: int) -> void:
 
 
 func _name_of_peer(id: int) -> String:
+	if computers.has(id):
+		return str(computers[id])
 	for r in roster:
 		if int(r.peer) == id:
 			return r.name
@@ -315,6 +320,9 @@ func _name_of_peer(id: int) -> String:
 
 
 func _add_player(peer: int, local_slot: int, who: String) -> int:
+	if local_slot < 1 or local_slot > GameState.MAX_PLAYERS:
+		return 0
+	who = who.left(16)
 	for r in roster:
 		if int(r.peer) == peer and int(r.local) == local_slot:
 			return int(r.slot)
@@ -429,6 +437,7 @@ func _mirror_keys() -> void:
 
 
 func _release_slot(slot: int) -> void:
+	_remote_last.erase(slot)
 	for a in ACTIONS:
 		Input.action_release("p%d_%s" % [slot, a])
 
@@ -488,10 +497,12 @@ func _join_relay() -> void:
 	var entry := _pending_relay
 	_pending_relay = {}
 	if entry.is_empty():
+		leave()
 		failed.emit("Can't reach the host")
 		return
 	var relay_ip := IP.resolve_hostname(LobbyApi.host_of(lobby_url), IP.TYPE_IPV4)
 	if relay_ip == "":
+		leave()
 		failed.emit("Can't reach the server list")
 		return
 	_relay_client = RelayClient.new(relay_ip, int(entry.relay_port), entry.id)
@@ -504,6 +515,7 @@ func _start_client(ip: String, port: int, text: String) -> void:
 	_peer = ENetMultiplayerPeer.new()
 	var err := _peer.create_client(ip, port)
 	if err != OK:
+		leave()
 		failed.emit("Can't connect (%s)" % error_string(err))
 		return
 	_peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
@@ -638,6 +650,9 @@ func _kicked(reason: String) -> void:
 func _set_roster(r: Array) -> void:
 	roster = r
 	_apply_joined()
+	for slot in _last_input.keys():
+		if not my_slots().has(slot):
+			_last_input.erase(slot)  # (rejoining: send the keys again)
 	roster_changed.emit()
 
 
@@ -668,6 +683,10 @@ func leave() -> void:
 			InputMap.action_add_event(action, e)
 	_erased_events.clear()
 	_mirrored.clear()
+	_remote_last.clear()
+	_token_path = ""
+	_loaded_scene = null
+	_full_next = false
 	typing = false
 	var chat := get_node_or_null("/root/Chat")
 	if chat and not _quitting:
@@ -695,6 +714,7 @@ func leave() -> void:
 	_last_input.clear()
 	if was_online and not _offline_joined.is_empty():
 		GameState.joined = _offline_joined
+	_offline_joined = [] as Array[int]
 	roster_changed.emit()
 
 
@@ -753,6 +773,7 @@ func allow_scene_change(path: String, message: String, message_time: float) -> b
 @rpc("authority", "call_remote", "reliable")
 func _load_scene(path: String, message: String, message_time: float, token: int, extra := {}) -> void:
 	_scene_token = token
+	_token_path = path
 	if extra.has("map"):
 		Party.session["map"] = extra.map  # custom arena: build the host's map
 	_reset_sync()
@@ -790,8 +811,13 @@ func _physics_process(_d: float) -> void:
 		_send_inputs()
 	elif is_host():
 		_frame += 1
-		if _frame % SNAPSHOT_EVERY == 0 and multiplayer.get_peers().size() > 0:
-			_send_snapshot(_frame % FULL_EVERY == 0)
+		if multiplayer.get_peers().size() > 0:
+			if _frame % SNAPSHOT_EVERY == 0 or _full_next:
+				_send_snapshot(_frame % FULL_EVERY == 0 or _full_next)
+				_full_next = false
+			else:
+				_send_players_fast()
+		_reapply_inputs()
 
 
 ## Client: our players' buttons -> host (only when something changed).
@@ -815,7 +841,45 @@ func _remote_input(slot: int, v: PackedByteArray) -> void:
 			owned = true
 	if not owned:
 		return
+	_remote_last[slot] = v
 	_apply_input(slot, v)
+
+
+## Host: the players' positions every frame in between snapshots (the robots
+## are what people watch; the rest goes 30 times a second).
+func _send_players_fast() -> void:
+	var scene := get_tree().current_scene
+	if scene == null or scene.scene_file_path == "":
+		return
+	var players := PackedInt32Array()
+	for p in get_tree().get_nodes_in_group("players"):
+		if p.is_inside_tree() and scene.is_ancestor_of(p):
+			players.append_array([p.get_meta("player_index", 0) + 1, roundi(p.global_position.x), roundi(p.global_position.y)])
+	if not players.is_empty():
+		_players_fast.rpc(_scene_token, players)
+
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func _players_fast(token: int, players: PackedInt32Array) -> void:
+	var scene := get_tree().current_scene
+	if token != _scene_token or scene == null or (_token_path != "" and scene.scene_file_path != _token_path):
+		return
+	for i in range(0, players.size() - 2, 3):
+		var p := scene.get_node_or_null("Player%d" % players[i])
+		if p and p.has_method("net_move"):
+			p.net_move(Vector2(players[i + 1], players[i + 2]))
+
+
+## Host: what each remote slot holds is pressed again now and then (the window
+## losing focus lets go of every key, and clients only send changes).
+var _remote_last := {}
+func _reapply_inputs() -> void:
+	if _frame % 15 != 0:
+		return
+	for slot in _remote_last:
+		_apply_input(slot, _remote_last[slot])
+	for slot in _mirrored:
+		_apply_input(slot, _mirrored[slot])
 
 
 ## Presses a game slot's buttons as `v` says (one strength per ACTIONS entry).
@@ -880,6 +944,20 @@ func _reset_sync() -> void:
 
 
 ## Host: everything a newcomer needs (the whole id table, then a full snapshot).
+var _token_path := ""        # client: the scene the current token is for
+var _loaded_scene: Node = null
+
+
+## Client -> host: the new scene is up (anything sent while it loaded was dropped).
+@rpc("any_peer", "call_remote", "reliable")
+func _scene_ready(token: int) -> void:
+	if is_host() and token == _scene_token:
+		_full_next = true
+
+
+var _full_next := false
+
+
 func _welcome(peer: int) -> void:
 	var table := {}
 	for key in _ids:
@@ -964,6 +1042,11 @@ func _snapshot(token: int, players: PackedInt32Array, entries: Array) -> void:
 	var scene := get_tree().current_scene
 	if token != _scene_token or scene == null or not scene.is_node_ready():
 		return
+	if _token_path != "" and scene.scene_file_path != _token_path:
+		return  # still showing the last scene (the new one is fading in)
+	if scene != _loaded_scene:
+		_loaded_scene = scene
+		_scene_ready.rpc_id(1, token)  # host: send everything again, we're there
 	_applying = true
 	if not players.is_empty():
 		_reconcile_players(scene, players)

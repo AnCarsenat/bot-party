@@ -48,5 +48,5 @@ func net_state() -> Array:
 
 func net_apply(s: Array) -> void:
 	super.net_apply(s)
-	if s.size() > 3 and absf(_t - s[3]) > 0.1:
-		_t = s[3]
+	if s.size() > 3 and absf(_t - (s[3] + NetCheck.lead(self))) > 0.08:
+		_t = s[3] + NetCheck.lead(self)

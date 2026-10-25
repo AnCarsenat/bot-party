@@ -30,8 +30,11 @@ func net_state() -> Array:
 
 
 func net_apply(s: Array) -> void:
-	if absf(_t - s[0]) > 0.1:
-		_t = s[0]
+	# Online client: a little ahead of the host's clock (what we see is what
+	# the host will check our robot against).
+	var host_t: float = s[0] + NetCheck.lead(self)
+	if absf(_t - host_t) > 0.08:
+		_t = host_t
 
 
 func forward() -> Vector2:

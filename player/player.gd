@@ -114,7 +114,10 @@ func net_state() -> Array:
 	return [Vector2i(global_position.round()), _sprite.frame, _face.frame, _sprite.flip_h,
 		_sprite.scale, visible, get_meta("eliminated", false), get_meta("finished", false),
 		get_meta("coin", false), snappedf(modulate.a, 0.05), [] if get_meta("eliminated", false) else statuses.keys(),
-		is_physics_processing()]
+		# Can it move (a finished robot is switched off as a whole), and how it
+		# moves (surprise rules; party robots go through each other).
+		can_process() and is_physics_processing(),
+		[gravity, speed, jump_speed, collision_mask & Layers.PLAYERS == 0]]
 
 
 ## Online client: is this one of our own robots (moved here, not by the host)?
@@ -124,21 +127,28 @@ func _predicted() -> bool:
 
 
 var _history: Array = []  # predicted: [msec, position] of the last second
+var _net_vel := Vector2.ZERO  # others: how fast they were going (between news)
+var _net_at := 0              # msec of the last news about them
+var _nudge := Vector2.ZERO    # predicted: correction still to make up
 
 
 func net_apply(s: Array) -> void:
 	var pos := Vector2(s[0])
 	var predicted := _predicted()
+	if s.size() > 12:
+		gravity = s[12][0]
+		speed = s[12][1]
+		jump_speed = s[12][2]
+		set_ghostly(s[12][3])
 	if predicted:
 		# Moving it ourselves (the host says when it can move at all).
-		set_physics_process(s[11] if s.size() > 11 else true)
+		var can_move: bool = (s[11] if s.size() > 11 else true) and not s[7]
+		set_physics_process(can_move)
 		_net_target = Vector2.INF
 		_correct(pos)
 	else:
 		set_physics_process(false)
-		if _net_target == Vector2.INF or global_position.distance_to(pos) > 200.0:
-			global_position = pos  # first update or teleport (respawn, door...)
-		_net_target = pos
+		net_move(pos)
 		_sprite.frame = s[1]
 		_face.frame = s[2]
 		_sprite.flip_h = s[3]
@@ -146,6 +156,8 @@ func net_apply(s: Array) -> void:
 		_sprite.scale = s[4]
 	visible = s[5]
 	set_meta("finished", s[7])
+	if s[7]:
+		remove_from_group("camera_follow")  # made it: the camera keeps to the others
 	set_meta("coin", s[8])
 	modulate.a = s[9]
 	if s.size() > 10:
@@ -159,32 +171,63 @@ func net_apply(s: Array) -> void:
 			game.eliminate_player(self)
 
 
+## Online client: where the host has one of the others now (snapshots, and
+## every frame in between). Shown smoothly, a little ahead along its speed.
+func net_move(pos: Vector2) -> void:
+	if _predicted():
+		return
+	var now := Time.get_ticks_msec()
+	if _net_target == Vector2.INF or global_position.distance_to(pos) > 200.0:
+		global_position = pos  # first update or teleport (respawn, door...)
+		_net_vel = Vector2.ZERO
+	elif now > _net_at and _net_target != pos:
+		_net_vel = _net_vel.lerp((pos - _net_target) / ((now - _net_at) / 1000.0), 0.5)
+	elif _net_target == pos:
+		_net_vel = Vector2.ZERO
+	_net_target = pos
+	_net_at = now
+
+
 func _process(delta: float) -> void:
 	if _net_target != Vector2.INF:
-		global_position = global_position.lerp(_net_target, 1.0 - exp(-30.0 * delta))
+		var ahead := clampf((Time.get_ticks_msec() - _net_at) / 1000.0, 0.0, 0.08)
+		var aim := _net_target + _net_vel * ahead
+		global_position = global_position.lerp(aim, 1.0 - exp(-18.0 * delta))
+	elif _nudge != Vector2.ZERO:
+		# Predicted: a correction made up over a few frames, not in one jump.
+		var step := _nudge * minf(1.0, 12.0 * delta)
+		global_position += step
+		_nudge -= step
+		for h in _history:
+			h[1] += step  # (so the same difference isn't made up twice)
+		if _nudge.length() < 0.5:
+			_nudge = Vector2.ZERO
 
 
 ## Predicted robot: where the host has it is where we were about one round
-## trip ago; if that's off, part of the difference is made up (all of it when
-## far: a respawn or a teleport).
+## trip ago; if that's off, the difference is made up over a few frames (at
+## once when far: a respawn or a teleport).
 func _correct(host_pos: Vector2) -> void:
 	var net := get_tree().root.get_node("Net")
-	var then: int = Time.get_ticks_msec() - net.round_trip_ms() - 20
+	var then: float = Time.get_ticks_msec() - net.round_trip_ms() - 20
 	var was := global_position
-	for h in _history:
-		if h[0] <= then:
-			was = h[1]
-		else:
+	for i in _history.size():
+		if _history[i][0] > then:
+			if i > 0:
+				# Between the two samples around that moment.
+				var a: Array = _history[i - 1]
+				var b: Array = _history[i]
+				var t := clampf((then - a[0]) / maxf(1.0, b[0] - a[0]), 0.0, 1.0)
+				was = Vector2(a[1]).lerp(b[1], t)
 			break
-	var off := host_pos - was
-	if off.length() > 220.0:
+		was = _history[i][1]
+	var off := host_pos - was - _nudge
+	if (host_pos - was).length() > 220.0:
 		global_position = host_pos
 		_history.clear()
-	elif off.length() > 6.0:
-		var step := off * 0.2
-		global_position += step
-		for h in _history:
-			h[1] += step  # (so the same difference isn't made up twice)
+		_nudge = Vector2.ZERO
+	elif off.length() > 10.0:
+		_nudge += off * 0.5
 
 
 func _record_history() -> void:

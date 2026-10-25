@@ -116,5 +116,6 @@ func net_state() -> Array:
 
 
 func net_apply(s: Array) -> void:
-	if absf(_angle - s[0]) > 0.02:
-		_angle = s[0]
+	var host_a: float = s[0] + spin * NetCheck.lead(self) * (-1.0 if mirrored else 1.0)
+	if absf(_angle - host_a) > 0.02:
+		_angle = host_a

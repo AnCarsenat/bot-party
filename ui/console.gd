@@ -99,6 +99,7 @@ func is_open() -> bool:
 
 func toggle(open: bool) -> void:
 	_panel.visible = open
+	Net.typing = open  # online: typing here doesn't move your robots
 	if open:
 		_line.grab_focus()
 		_line.clear()

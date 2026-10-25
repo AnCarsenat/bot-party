@@ -25,6 +25,14 @@ static func online(node: Node) -> bool:
 	return n != null and n.is_online()
 
 
+## Online client: about how far behind the host's clock its news arrives (half
+## a round trip, in seconds). Moving traps run that much ahead here, so they're
+## where the host will have them when our robot's moves get there. 0 otherwise.
+static func lead(node: Node) -> float:
+	var n := _net(node)
+	return n.round_trip_ms() / 2000.0 if n != null and n.is_client() else 0.0
+
+
 ## A client is applying something the host sent (gameplay code may run).
 static func applying(node: Node) -> bool:
 	var n := _net(node)
