@@ -166,6 +166,28 @@ func say(text: String) -> void:
 	_banner.text = text
 
 
+## For modes: the smaller line under it.
+func note(text: String) -> void:
+	_sub.text = text
+
+
+## For modes: did player `slot` just press `what` ("action_1" is jump, "move_left"...)?
+func pressed(slot: int, what: String) -> bool:
+	return _pressed(slot, what)
+
+
+## For modes: show the cards again after changing `picks` / `cursors`.
+func update_box() -> void:
+	_update_box()
+
+
+## For modes (custom picking): everyone who'll place has a card in `picks`
+## (slot -> card index in `box`); on to placing.
+func start_place() -> void:
+	if phase == Phase.PICK:
+		_start_place()
+
+
 ## Console "next": on to the next round.
 func skip_round() -> String:
 	match phase:
@@ -785,6 +807,7 @@ func _start_pick() -> void:
 	_box_row.show()
 	_scoreboard.hide()
 	_update_box()
+	mode.pick_started(self)
 
 
 ## If no card in the box is of `kind` ("help" or "trap"), one card becomes one.
@@ -819,6 +842,8 @@ func _start_place() -> void:
 	mirrors.clear()
 	for i in slots.size():
 		var slot := slots[i]
+		if not picks.has(slot):
+			continue  # got no card (a mode can do that): nothing to place
 		var id := _open_card(box[picks[slot]])
 		turns[slot] = 0
 		mirrors[slot] = false
@@ -1039,7 +1064,11 @@ func _process(delta: float) -> void:
 		_client_predict(delta)  # our own cursors answer at once
 		return  # online: the host runs the rounds
 	match phase:
-		Phase.PICK: _process_pick()
+		Phase.PICK:
+			if mode.custom_pick:
+				mode.process_pick(self, delta)  # the mode hands the cards out (auction...)
+			else:
+				_process_pick()
 		Phase.PLACE: _process_place(delta)
 		Phase.RUN: _process_run(delta)
 	if phase != Phase.PLACE and not ghosts.is_empty():

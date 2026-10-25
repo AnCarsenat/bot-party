@@ -1,0 +1,13 @@
+{
+  "name": "Auction",
+  "author": "Bot Party",
+  "version": "1.0",
+  "description": "A game mode: the cards are sold one at a time, for coins (Party > Rules > Mode).",
+  "modes": {
+    "auction": {
+      "name": "Auction",
+      "description": "The cards are sold one at a time: jump to bid your coins (5 more each round). Unsold cards go to whoever has none.",
+      "script": "auction.gd"
+    }
+  }
+}

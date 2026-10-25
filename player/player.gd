@@ -154,6 +154,10 @@ func net_apply(s: Array) -> void:
 		_sprite.flip_h = s[3]
 		_face.flip_h = s[3]
 		_sprite.scale = s[4]
+		if _look:
+			_look.flip_h = s[3]
+			if _look_on_face:
+				_look.position.y = _look_offset.y + _face_bob(s[2] if s[2] < _face.hframes else 0)
 	visible = s[5]
 	set_meta("finished", s[7])
 	if s[7]:
@@ -575,6 +579,67 @@ func _shove_machines() -> void:
 
 
 ## Squash & stretch and facing direction (sprite only, the hitbox never changes).
+# --- Cosmetics (hats and such, from mods) --------------------------------------
+
+var _look: Sprite2D = null
+var _look_on_face := false
+var _look_offset := Vector2.ZERO  # pixels of the robot's frame (a tall hat: up)
+var look_id := ""
+static var _bob: Array = []  # face frame -> how far it's drawn below frame 0 (pixels)
+
+
+## Puts on a cosmetic (a mod's hat, glasses...), or takes it off with "".
+func set_look(id: String) -> void:
+	if id == look_id and (_look != null) == (id != ""):
+		return
+	look_id = id
+	if _look:
+		_look.queue_free()
+		_look = null
+	var mods := get_tree().root.get_node_or_null("Mods") if is_inside_tree() else null
+	if id == "" or mods == null:
+		return
+	var def: Dictionary = mods.cosmetics().get(id, {})
+	var tex: Texture2D = mods.look_texture(id)
+	if def.is_empty() or tex == null:
+		return
+	# A picture the size of a robot frame (32 x 32), over the body: it gets its
+	# squash and stretch, not its colour.
+	_look = Sprite2D.new()
+	_look.name = "Look"
+	_look.texture = tex
+	_look.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_look_on_face = def.slot == "face"
+	_look_offset = def.get("offset", Vector2.ZERO)
+	_look.position = _look_offset
+	_sprite.add_child(_look)
+	_look.flip_h = _sprite.flip_h
+
+
+## The face is drawn a pixel higher or lower in some frames (running, jumping).
+func _face_bob(frame: int) -> float:
+	if _bob.is_empty():
+		var img := _face.texture.get_image() if _face.texture else null
+		var w := 32
+		for f in _face.hframes:
+			var top := 0
+			if img:
+				for y in img.get_height():
+					var hit := false
+					for x in w:
+						if img.get_pixel(f * w + x, y).a > 0.0:
+							hit = true
+							break
+					if hit:
+						top = y
+						break
+			_bob.append(top)
+		var first: int = _bob[0]
+		for i in _bob.size():
+			_bob[i] -= first
+	return float(_bob[frame]) if frame < _bob.size() else 0.0
+
+
 func _animate(delta: float) -> void:
 	_squash = _squash.lerp(Vector2.ONE, 1.0 - exp(-14.0 * delta))
 	_sprite.scale = _base_scale * _squash
@@ -583,6 +648,8 @@ func _animate(delta: float) -> void:
 	if absf(velocity.x) > 10.0:
 		_sprite.flip_h = velocity.x < 0.0
 		_face.flip_h = _sprite.flip_h
+	if _look:
+		_look.flip_h = _sprite.flip_h
 
 	# Pick the animation frame.
 	var frame := FRAME_IDLE
@@ -597,6 +664,8 @@ func _animate(delta: float) -> void:
 		frame = FRAME_IDLE + int(_anim_time) % 2
 	_sprite.frame = frame
 	_face.frame = frame
+	if _look and _look_on_face:
+		_look.position.y = _look_offset.y + _face_bob(frame)  # glasses and such follow the face
 	# Blink now and then (only when standing still, where the blink frame lines up).
 	_blink_in -= delta
 	if _blink_in <= 0.0:

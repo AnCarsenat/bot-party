@@ -19,6 +19,8 @@ signal connected                    ## client: joined the host
 signal failed(reason: String)       ## client: couldn't join / lost the host
 signal servers_listed(list: Array)  ## server list arrived (or [] on error)
 signal chat_received(who: String, text: String)  ## who = "" for the game's own messages
+signal mods_offered(list: Array)    ## client: the host can send the mods we lack ([{id, name, version, size}])
+signal mods_progress(done: int, total: int)  ## client: bytes of mods received so far
 
 enum Mode { OFFLINE, HOST, CLIENT }
 
@@ -118,6 +120,53 @@ func local_keys_for(slot: int) -> int:
 	if not is_online():
 		return slot
 	return my_slots().get(slot, 0)
+
+
+# --- Looks (cosmetics from mods) -------------------------------------------------
+
+## The cosmetic the robot in game slot `slot` wears: online, what its player
+## chose (in the roster); offline, the key set's choice; bots get one too.
+func look_for(slot: int) -> String:
+	var mods := _mods()
+	var all: Dictionary = mods.cosmetics() if mods else {}
+	if all.is_empty():
+		return ""
+	if is_online():
+		for r in roster:
+			if int(r.slot) == slot:
+				return str(r.get("look", ""))
+		if not bots.has(slot):
+			return ""
+	elif not get_node("/root/Party").bots().has(slot) or not _in_party():
+		var mine := GameState.look_of(slot)
+		return mine if all.has(mine) else ""
+	# Bots: one each, from what's there (the same on every computer).
+	var ids := all.keys()
+	ids.sort()
+	var k := (slot * 7) % (ids.size() + 1)  # (0: none)
+	return "" if k == 0 else ids[k - 1]
+
+
+func _in_party() -> bool:
+	var s := get_tree().current_scene
+	return s != null and s.has_node("PartyController")
+
+
+func _my_looks() -> Dictionary:
+	var out := {}
+	for l in GameState.joined:
+		out[str(l)] = GameState.look_of(l)
+	return out
+
+
+## Robots already in the level put on what the roster says.
+func _refresh_looks() -> void:
+	var scene := get_tree().current_scene if get_tree() else null
+	if scene == null:
+		return
+	for p in get_tree().get_nodes_in_group("players"):
+		if scene.is_ancestor_of(p) and p.has_method("set_look"):
+			p.set_look(look_for(p.get_meta("player_index", 0) + 1))
 
 
 ## A player online: its computer's name, plus its number there when that
@@ -251,7 +300,7 @@ func _on_peer_disconnected(id: int) -> void:
 
 ## A client says hello with its name and the key sets of its players.
 @rpc("any_peer", "call_remote", "reliable")
-func _hello(who: String, local_slots: Array, their_mods := []) -> void:
+func _hello(who: String, local_slots: Array, their_mods := [], looks := {}) -> void:
 	if not is_host():
 		return
 	var id := multiplayer.get_remote_sender_id()
@@ -261,18 +310,131 @@ func _hello(who: String, local_slots: Array, their_mods := []) -> void:
 		return
 	var missing := _missing_mods(their_mods)
 	if missing != "":
-		_refused.rpc_id(id, "You need these mods to join: " + missing)
+		# Offer to send them (the player says yes or no: mods run code).
+		var offer := []
+		for r in _mods().required():
+			if not r in their_mods:
+				var mid: String = r.split("@")[0]
+				var file: String = _mods().pack_for(mid)
+				if file == "":
+					offer.clear()
+					break
+				var m: Dictionary = _mods().get_mod(mid)
+				offer.append({"id": mid, "name": str(m.get("name", mid)), "version": str(m.get("version", "1")),
+					"size": FileAccess.get_file_as_bytes(file).size(), "file": file})
+		if offer.is_empty():
+			_refused.rpc_id(id, "You need these mods to join: " + missing)
+			return
+		_offers[id] = offer
+		_offer_mods.rpc_id(id, offer.map(func(o): return {"id": o.id, "name": o.name, "version": o.version, "size": o.size}))
 		return
 	computers[id] = who.left(16)
 	_announce("%s joined" % who.left(16))
 	for l in local_slots:
-		_add_player(id, int(l), who)
+		_add_player(id, int(l), who, str(looks.get(str(l), looks.get(int(l), ""))))
 	_roster_updated()
 	# Bring the newcomer to where we are.
 	var scene := get_tree().current_scene
 	if scene and scene.scene_file_path != "":
 		_load_scene.rpc_id(id, scene.scene_file_path, "", 0.0, _scene_token, _scene_extra(scene.scene_file_path))
 		_welcome.call_deferred(id)
+
+
+# --- Sending mods (host -> a joining player) ------------------------------------
+
+const MOD_CHUNK := 32 * 1024
+const CHUNKS_PER_FRAME := 8
+var _offers := {}     # host: peer -> what we offered it
+var _sending := []    # host: [peer, id, bytes, next chunk]
+var _receiving := {}  # client: id -> PackedByteArray so far
+var _expect := {}     # client: id -> size
+
+
+@rpc("authority", "call_remote", "reliable")
+func _offer_mods(list: Array) -> void:
+	if not is_client():
+		return
+	_expect.clear()
+	for o in list:
+		_expect[str(o.id)] = int(o.size)
+	mods_offered.emit(list)
+
+
+## Client: yes, send them (or no: we leave).
+func accept_mods(yes: bool) -> void:
+	if not is_client():
+		return
+	if not yes:
+		leave()
+		failed.emit("Not joined: that game needs mods")
+		return
+	_receiving.clear()
+	status.emit("Downloading the mods...")
+	_want_mods.rpc_id(1)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _want_mods() -> void:
+	var peer := multiplayer.get_remote_sender_id()
+	if not is_host() or not _offers.has(peer):
+		return
+	for o in _offers[peer]:
+		_sending.append([peer, o.id, FileAccess.get_file_as_bytes(o.file), 0])
+	_offers.erase(peer)
+
+
+## Host: a few pieces each frame (so the game doesn't stall).
+func _send_mod_chunks() -> void:
+	var budget := CHUNKS_PER_FRAME
+	while budget > 0 and not _sending.is_empty():
+		var s: Array = _sending[0]
+		if not s[0] in multiplayer.get_peers():
+			_sending.pop_front()
+			continue
+		var bytes: PackedByteArray = s[2]
+		var count := maxi(1, ceili(bytes.size() / float(MOD_CHUNK)))
+		var i: int = s[3]
+		_mod_chunk.rpc_id(s[0], s[1], i, count, bytes.slice(i * MOD_CHUNK, (i + 1) * MOD_CHUNK))
+		s[3] = i + 1
+		if s[3] >= count:
+			_sending.pop_front()
+		budget -= 1
+
+
+@rpc("authority", "call_remote", "reliable")
+func _mod_chunk(id: String, index: int, count: int, data: PackedByteArray) -> void:
+	if not is_client() or not _expect.has(id):
+		return
+	if index == 0:
+		_receiving[id] = PackedByteArray()
+	_receiving[id].append_array(data)
+	var done := 0
+	var total := 0
+	for k in _expect:
+		total += int(_expect[k])
+		done += _receiving.get(k, PackedByteArray()).size()
+	mods_progress.emit(done, total)
+	if index < count - 1:
+		return
+	# This one's here: save it and load it.
+	DirAccess.make_dir_recursive_absolute(_mods().NET_DIR)
+	var file: String = _mods().NET_DIR.path_join(ArenaMap.slug(id) + ".pck")
+	var f := FileAccess.open(file, FileAccess.WRITE)
+	if f == null:
+		leave()
+		failed.emit("Couldn't save the mod " + id)
+		return
+	f.store_buffer(_receiving[id])
+	f.close()
+	if not _mods().mount_net(file):
+		leave()
+		failed.emit("Couldn't load the mod " + id)
+		return
+	_expect.erase(id)
+	if _expect.is_empty():
+		# Everything's here: say hello again, with them.
+		status.emit("Mods loaded, joining...")
+		_hello.rpc_id(1, player_name, Array(GameState.joined), _mods().required(), _my_looks())
 
 
 ## Host: which of our item mods the client lacks ("" = none).
@@ -282,6 +444,10 @@ func _missing_mods(theirs: Array) -> String:
 		if not r in theirs:
 			out.append(r.split("@")[0])
 	return ", ".join(out)
+
+
+func was_online_for_mods() -> bool:
+	return _mods() != null and _mods()._net_on
 
 
 func _mods() -> Node:
@@ -297,10 +463,10 @@ func _refused(reason: String) -> void:
 
 ## A client's player joins (from their lobby) or leaves.
 @rpc("any_peer", "call_remote", "reliable")
-func _request_join(local_slot: int) -> void:
+func _request_join(local_slot: int, look := "") -> void:
 	if not is_host():
 		return
-	_add_player(multiplayer.get_remote_sender_id(), local_slot, _name_of_peer(multiplayer.get_remote_sender_id()))
+	_add_player(multiplayer.get_remote_sender_id(), local_slot, _name_of_peer(multiplayer.get_remote_sender_id()), look)
 	_roster_updated()
 
 
@@ -325,7 +491,7 @@ func _name_of_peer(id: int) -> String:
 	return "Player"
 
 
-func _add_player(peer: int, local_slot: int, who: String) -> int:
+func _add_player(peer: int, local_slot: int, who: String, look := "") -> int:
 	if local_slot < 1 or local_slot > GameState.MAX_PLAYERS:
 		return 0
 	who = who.left(16)
@@ -343,7 +509,8 @@ func _add_player(peer: int, local_slot: int, who: String) -> int:
 			if not s in used:
 				slot = s
 				break
-	roster.append({"slot": slot, "peer": peer, "local": local_slot, "name": who})
+	roster.append({"slot": slot, "peer": peer, "local": local_slot, "name": who,
+		"look": look if look == "" or _mods().cosmetics().has(look) else ""})
 	# Joining in the middle of a level: drop in (party mode: from the next party).
 	var scene := get_tree().current_scene
 	var spawner := scene.get_node_or_null("PlayerSpawner") if scene else null
@@ -357,7 +524,7 @@ func _add_player(peer: int, local_slot: int, who: String) -> int:
 func host_local_join(local_slot: int) -> void:
 	if bot_at(local_slot) != 0:
 		remove_bot_at(local_slot)  # a player takes the bot's place
-	if _add_player(1, local_slot, player_name) != 0:
+	if _add_player(1, local_slot, player_name, GameState.look_of(local_slot)) != 0:
 		_roster_updated()
 
 
@@ -372,6 +539,7 @@ func host_local_leave(local_slot: int) -> void:
 func _roster_updated() -> void:
 	roster.sort_custom(func(a, b): return int(a.slot) < int(b.slot))
 	_apply_joined()
+	_refresh_looks()
 	if is_host():
 		_set_roster.rpc(roster)
 		_set_computers.rpc(computers, bots, bot_places)
@@ -542,7 +710,7 @@ func _start_client(ip: String, port: int, text: String) -> void:
 func _on_connected() -> void:
 	_short_timeout(1)
 	_offline_joined = GameState.joined.duplicate()
-	_hello.rpc_id(1, player_name, Array(GameState.joined), _mods().required())
+	_hello.rpc_id(1, player_name, Array(GameState.joined), _mods().required(), _my_looks())
 	status.emit("Connected")
 	connected.emit()
 
@@ -720,6 +888,7 @@ func _kicked(reason: String) -> void:
 func _set_roster(r: Array) -> void:
 	roster = r
 	_apply_joined()
+	_refresh_looks()
 	for slot in _last_input.keys():
 		if not my_slots().has(slot):
 			_last_input.erase(slot)  # (rejoining: send the keys again)
@@ -729,7 +898,7 @@ func _set_roster(r: Array) -> void:
 ## Client lobby: one of this computer's players joins or leaves.
 func request_join(local_slot: int) -> void:
 	if is_client():
-		_request_join.rpc_id(1, local_slot)
+		_request_join.rpc_id(1, local_slot, GameState.look_of(local_slot))
 	elif is_host():
 		host_local_join(local_slot)
 
@@ -754,6 +923,12 @@ func leave() -> void:
 	_erased_events.clear()
 	_mirrored.clear()
 	_remote_last.clear()
+	_offers.clear()
+	_sending.clear()
+	_receiving.clear()
+	_expect.clear()
+	if was_online_for_mods():
+		_mods().set_net_on(false)  # the host's mods: off again
 	_token_path = ""
 	_loaded_scene = null
 	_full_next = false
@@ -890,6 +1065,8 @@ func _physics_process(_d: float) -> void:
 			else:
 				_send_players_fast()
 		_reapply_inputs()
+		if not _sending.is_empty():
+			_send_mod_chunks()
 
 
 ## Client: our players' buttons -> host (only when something changed).

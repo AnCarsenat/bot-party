@@ -63,6 +63,10 @@ func spawn(slot: int, pos: Vector2, show_tag: bool, deferred := false) -> Charac
 	else:
 		get_parent().add_child(p)
 	players.append(p)
+	# A hat or such (cosmetics from mods), once it's in the level.
+	var net := get_tree().root.get_node_or_null("Net")
+	if net:
+		(func(): if is_instance_valid(p) and p.is_inside_tree(): p.set_look(net.look_for(slot))).call_deferred()
 	return p
 
 

@@ -1,0 +1,41 @@
+{
+  "name": "Hats",
+  "author": "Bot Party",
+  "version": "1.0",
+  "description": "Hats and glasses for the robots: choose them in Mods > Looks.",
+  "cosmetics": {
+    "top_hat": {
+      "name": "Top hat",
+      "picture": "top_hat.png",
+      "offset": [
+        0,
+        -8
+      ]
+    },
+    "party_hat": {
+      "name": "Party hat",
+      "picture": "party_hat.png",
+      "offset": [
+        0,
+        -8
+      ]
+    },
+    "crown": {
+      "name": "Crown",
+      "picture": "crown.png"
+    },
+    "propeller_cap": {
+      "name": "Propeller cap",
+      "picture": "propeller_cap.png"
+    },
+    "headphones": {
+      "name": "Headphones",
+      "picture": "headphones.png"
+    },
+    "sunglasses": {
+      "name": "Sunglasses",
+      "picture": "sunglasses.png",
+      "slot": "face"
+    }
+  }
+}

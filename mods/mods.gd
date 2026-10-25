@@ -23,6 +23,12 @@ const CFG := "user://mods.cfg"
 var mods: Array = []
 var _keep: Array = []  # replaced textures (kept alive)
 var _mounted := {}  # pack file -> [mod ids in it]
+## Packs the host of an online game sent us (user://mods_net/): on while we're in
+## that game, off again after (gone at the next start).
+var _net_files := {}
+var _net_on := false
+const NET_DIR := "user://mods_net"
+const CACHE_DIR := "user://mods_cache"
 
 
 func _init() -> void:
@@ -52,7 +58,10 @@ func scan() -> void:
 		if not m.is_empty():
 			m.kind = "folder"
 			found.append([m, true])
-	for file in _mounted:
+	# (Packs from a host first: they're the version that game needs.)
+	var mounted := _mounted.keys()
+	mounted.sort_custom(func(a, b): return a in _net_files and not b in _net_files)
+	for file in mounted:
 		for id in _mounted[file]:
 			var m := _read(PROJECT_DIR.path_join(id))
 			if not m.is_empty():
@@ -81,6 +90,10 @@ func scan() -> void:
 			continue
 		off.description = "Switch it on to load it."
 		found.append([off, true])
+	# A mod the host sent wins over our own copy of it (another version).
+	if _net_on:
+		var net := found.filter(func(f): return f[0].get("pack", "") in _net_files)
+		found = net + found.filter(func(f): return not f[0].get("pack", "") in _net_files)
 	var seen := {}
 	for f in found:
 		var m: Dictionary = f[0]
@@ -88,6 +101,9 @@ func scan() -> void:
 			continue  # same mod twice (a pack and its project folder): the first wins
 		seen[m.id] = true
 		m.enabled = bool(cfg.get_value("enabled", m.id, f[1])) and (m.kind != "pack" or m.has("pack") and _mounted.has(m.pack))
+		if m.get("pack", "") in _net_files:
+			m.net = true
+			m.enabled = _net_on  # the host's: only while in its game
 		mods.append(m)
 
 
@@ -136,6 +152,25 @@ func modes() -> Dictionary:
 	return out
 
 
+## Hats and other cosmetics of every enabled mod ({"<mod>.<look>": {name,
+## picture, slot ("head": on the robot, "face": moves with its face)}}).
+func cosmetics() -> Dictionary:
+	var out := {}
+	for m in mods:
+		if m.enabled:
+			out.merge(m.get("cosmetics", {}))
+	return out
+
+
+var _look_textures := {}
+## A cosmetic's picture (loaded once).
+func look_texture(id: String) -> Texture2D:
+	if not _look_textures.has(id):
+		var d: Dictionary = cosmetics().get(id, {})
+		_look_textures[id] = texture(d.picture) if not d.is_empty() else null
+	return _look_textures[id]
+
+
 ## Folders with map files from enabled mods (ArenaMap.list_all reads them).
 func map_dirs() -> Array:
 	var out := []
@@ -152,9 +187,213 @@ func required() -> Array:
 	var out := []
 	for m in mods:
 		if m.enabled and (not m.items.is_empty() or not m.get("modes", {}).is_empty()
-				or m.maps.begins_with("res://")):
+				or not m.get("cosmetics", {}).is_empty() or m.maps.begins_with("res://")):
 			out.append("%s@%s" % [m.id, m.version])
 	return out
+
+
+# --- Online: the host sends its mods ------------------------------------------------
+
+## Host: a pack file of mod `id` to send to a player who doesn't have it: its own
+## pack, or one made from its folder (kept in user://mods_cache/). "" if it can't.
+func pack_for(id: String) -> String:
+	var m := get_mod(id)
+	if m.is_empty() or not m.enabled:
+		return ""
+	if m.kind == "pack" and FileAccess.file_exists(m.get("pack", "")):
+		return m.pack
+	DirAccess.make_dir_recursive_absolute(CACHE_DIR)
+	var out := CACHE_DIR.path_join("%s.pck" % id)
+	if m.kind == "project":
+		var err: String = load("res://editor/mod_packer.gd").pack(m.path, out)
+		return out if err == "" else ""
+	# A mod folder: its plain files, put where a pack's would be (res://mods/<id>/).
+	var files := []
+	_walk_files(m.path, files)
+	var pck := PCKPacker.new()
+	if pck.pck_start(out) != OK:
+		return ""
+	for f in files:
+		pck.add_file(PROJECT_DIR.path_join(id).path_join(f.trim_prefix(m.path).trim_prefix("/")), f)
+	return out if pck.flush() == OK else ""
+
+
+func _walk_files(dir: String, out: Array) -> void:
+	for f in DirAccess.get_files_at(dir):
+		if not f.begins_with("."):
+			out.append(dir.path_join(f))
+	for d in DirAccess.get_directories_at(dir):
+		if not d.begins_with("."):
+			_walk_files(dir.path_join(d), out)
+
+
+## Client: loads a pack the host sent (saved as `file`), on for this game only.
+## Its files replace those of an older version we may have.
+func mount_net(file: String) -> bool:
+	var before := DirAccess.get_directories_at(PROJECT_DIR)
+	if not ProjectSettings.load_resource_pack(file, true):
+		return false
+	var ids := []
+	for d in DirAccess.get_directories_at(PROJECT_DIR):
+		if not d in before:
+			ids.append(d)
+	if ids.is_empty():
+		ids.append(_pack_id(file))
+	_mounted[file] = ids
+	_net_files[file] = true
+	set_net_on(true)
+	return true
+
+
+## The host's mods on (in its game) or off (after).
+func set_net_on(on: bool) -> void:
+	if _net_on == on and not on:
+		return
+	_net_on = on
+	scan()
+	var party := get_node_or_null("/root/Party")
+	if party:
+		party.reload_items()
+
+
+# --- Installing mods: from a file, or from GitHub (Mods > Explore) -------------------
+
+## GitHub repositories with this topic are listed in Mods > Explore.
+const TOPIC := "bot-party-mod"
+const API := "https://api.github.com"
+
+
+## Copies a mod pack (.pck / .zip) into the mods folder and loads it. Returns an
+## error message, or "".
+func install_pack(from: String) -> String:
+	var ext := from.get_extension().to_lower()
+	if not ext in ["pck", "zip"]:
+		return "Choose a mod pack (.pck or .zip)"
+	DirAccess.make_dir_recursive_absolute(DIR)
+	var to := DIR.path_join(from.get_file())
+	if ProjectSettings.globalize_path(to) != ProjectSettings.globalize_path(from):
+		if DirAccess.copy_absolute(from, to) != OK:
+			return "Couldn't copy it into the mods folder"
+	return _load_installed(to)
+
+
+func _load_installed(file: String) -> String:
+	if not _mounted.has(file):
+		_mount(file)
+	if not _mounted.has(file):
+		return "Couldn't load %s (a mod pack for another version of the game?)" % file.get_file()
+	var cfg := ConfigFile.new()
+	cfg.load(CFG)
+	for id in _mounted[file]:
+		cfg.set_value("enabled", id, true)
+	cfg.save(CFG)
+	scan()
+	var party := get_node_or_null("/root/Party")
+	if party:
+		party.reload_items()
+	return ""
+
+
+## How Mods > Explore can sort.
+const EXPLORE_SORTS := ["Stars", "Date", "Name", "Downloads"]
+
+
+## Mods > Explore: repositories tagged as Bot Party mods, matching `search` (words
+## in their name or description), sorted by `sort` (one of EXPLORE_SORTS).
+## `done` gets [{name, full_name, description, stars, author, url, updated,
+## downloads (-1: not counted)}] (or [] and an error).
+func explore(done: Callable, search := "", sort := "Stars") -> void:
+	var q := "topic:%s" % TOPIC
+	if search.strip_edges() != "":
+		q = search.strip_edges().uri_encode() + "+" + q
+	var api_sort: String = {"Stars": "&sort=stars&order=desc", "Date": "&sort=updated&order=desc"}.get(sort, "")
+	_http_get(API + "/search/repositories?q=%s%s&per_page=40" % [q, api_sort], func(ok: bool, data):
+		if not ok or not data is Dictionary:
+			done.call([], "Couldn't reach GitHub")
+			return
+		var out := []
+		for r in data.get("items", []):
+			out.append({"name": str(r.get("name", "")), "full_name": str(r.get("full_name", "")),
+				"description": str(r.get("description", "") if r.get("description") != null else ""),
+				"stars": int(r.get("stargazers_count", 0)), "author": str(r.get("owner", {}).get("login", "")),
+				"url": str(r.get("html_url", "")), "updated": str(r.get("pushed_at", r.get("updated_at", ""))).left(10),
+				"downloads": -1})
+		match sort:
+			"Name":
+				out.sort_custom(func(a, b): return a.name.to_lower() < b.name.to_lower())
+				done.call(out, "")
+			"Downloads":
+				# GitHub's search doesn't say: count each one's release downloads
+				# (the first 20: GitHub limits how often we may ask).
+				_count_downloads(out, 0, func():
+					out.sort_custom(func(a, b): return a.downloads > b.downloads)
+					done.call(out, ""))
+			_:
+				done.call(out, "")
+	)
+
+
+func _count_downloads(list: Array, i: int, then: Callable) -> void:
+	if i >= mini(list.size(), 20):
+		then.call()
+		return
+	_http_get(API + "/repos/%s/releases?per_page=10" % list[i].full_name, func(ok: bool, data):
+		var n := 0
+		if ok and data is Array:
+			for rel in data:
+				for a in rel.get("assets", []):
+					n += int(a.get("download_count", 0))
+		list[i].downloads = n
+		_count_downloads(list, i + 1, then))
+
+
+## Downloads the mod pack of a repository's latest release and installs it.
+## `done` gets an error message, or "".
+func install_from_repo(full_name: String, done: Callable) -> void:
+	_http_get(API + "/repos/%s/releases/latest" % full_name, func(ok: bool, data):
+		if not ok or not data is Dictionary:
+			done.call("No release to download in %s" % full_name)
+			return
+		var asset = null
+		for a in data.get("assets", []):
+			if str(a.get("name", "")).get_extension().to_lower() in ["pck", "zip"]:
+				asset = a
+				break
+		if asset == null:
+			done.call("Its latest release has no mod pack (.pck)")
+			return
+		DirAccess.make_dir_recursive_absolute(DIR)
+		var file := DIR.path_join(str(asset.name).get_file())
+		var req := HTTPRequest.new()
+		req.download_file = file
+		req.timeout = 120.0
+		add_child(req)
+		req.request_completed.connect(func(result: int, code: int, _h, _b):
+			req.queue_free()
+			if result != HTTPRequest.RESULT_SUCCESS or code != 200:
+				DirAccess.remove_absolute(file)
+				done.call("The download didn't work")
+				return
+			done.call(_load_installed(file))
+		)
+		if req.request(str(asset.browser_download_url), ["User-Agent: BotParty", "Accept: application/octet-stream"]) != OK:
+			req.queue_free()
+			done.call("The download didn't work")
+	)
+
+
+func _http_get(url: String, done: Callable) -> void:
+	var req := HTTPRequest.new()
+	req.timeout = 15.0
+	add_child(req)
+	req.request_completed.connect(func(result: int, code: int, _h, body: PackedByteArray):
+		req.queue_free()
+		var data = JSON.parse_string(body.get_string_from_utf8()) if body.size() > 0 else null
+		done.call(result == HTTPRequest.RESULT_SUCCESS and code == 200, data)
+	)
+	if req.request(url, ["User-Agent: BotParty", "Accept: application/vnd.github+json"]) != OK:
+		req.queue_free()
+		done.call(false, null)
 
 
 func open_folder() -> void:
@@ -193,6 +432,18 @@ func _read(path: String) -> Dictionary:
 				m.problems.append("Missing file %s" % tex[game_path])
 			else:
 				m.textures[full] = _file(m, str(tex[game_path]))
+	m.cosmetics = {}
+	var looks = data.get("cosmetics", {})
+	if looks is Dictionary:
+		for look_id in looks:
+			var d = looks[look_id]
+			var pic := _file(m, str(d.get("picture", ""))) if d is Dictionary else ""
+			if pic == "" or not _exists(pic):
+				m.problems.append("Cosmetic %s: picture not found" % look_id)
+				continue
+			m.cosmetics["%s.%s" % [id, ArenaMap.slug(str(look_id))]] = {"name": str(d.get("name", look_id)).left(20),
+				"picture": pic, "slot": "face" if str(d.get("slot", "head")) == "face" else "head", "mod": id,
+				"offset": _value(d.get("offset", [0, 0])) if _value(d.get("offset", [0, 0])) is Vector2 else Vector2.ZERO}
 	m.modes = {}
 	var modes = data.get("modes", {})
 	if modes is Dictionary:
@@ -293,7 +544,7 @@ func _apply_textures(m: Dictionary) -> void:
 ## A blank mod entry.
 func _entry(id: String, name: String) -> Dictionary:
 	return {"id": id, "name": name, "author": "", "version": "1", "description": "", "path": "",
-		"kind": "folder", "enabled": true, "items": {}, "modes": {}, "textures": {}, "maps": "", "problems": []}
+		"kind": "folder", "enabled": true, "items": {}, "modes": {}, "cosmetics": {}, "textures": {}, "maps": "", "problems": []}
 
 
 ## A file of a mod: a scene, script or picture (Godot export may have renamed it).

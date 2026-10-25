@@ -5,9 +5,13 @@ A mod can:
 - **add party items**: new scenes and scripts, or the game's item scenes with new settings;
 - **add maps** for party mode, made in the game's map editor or as Godot scenes;
 - **add game modes**;
+- **add looks**: hats, glasses and other things players wear;
 - **replace textures** (any sprite in the game).
 
-Mods are switched on and off in **Settings > Mods**. There are two kinds:
+Mods are switched on and off in **Mods** (main menu). **Mods > Explore** finds
+mods shared on GitHub (searchable, sorted by stars, date, name or downloads) and
+installs them; **Browse...** installs a `.pck` from anywhere on your computer.
+There are two kinds:
 
 - **Mod packs** (`.pck` files), made in Godot. Everything in them works like the
   game's own files: scenes, scripts, pictures, sounds, map scenes with any nodes
@@ -19,11 +23,13 @@ Mods are switched on and off in **Settings > Mods**. There are two kinds:
 Both use the same `mod.json`. A complete example is in
 [`mods/example/`](mods/example): a pinball bumper, a long plank, a mint coin, a
 game mode, a map file and a map scene with a windmill. Its pack, `example.pck`,
-is on the [Releases page](https://github.com/AnCarsenat/bot-party/releases).
+is on the [Releases page](https://github.com/AnCarsenat/bot-party/releases), with
+two more: [`mods/hats/`](mods/hats) (six looks) and
+[`mods/auction/`](mods/auction) (a game mode where players bid for the cards).
 
 ## Where mods go
 
-**Settings > Mods > Open mods folder** opens the folder. Depending on your system,
+**Mods > Open mods folder** opens the folder. Depending on your system,
 it's here:
 
 | System  | Folder |
@@ -64,7 +70,7 @@ and [Godot 4.7](https://godotengine.org/download). Open `project.godot`, then:
    relative to the mod folder, or full `res://` paths.
 4. **Press F5** to try it. When the game runs from Godot, it uses your folder
    directly, so changes show up the next time you run it. (Mods in the project
-   are off until you switch them on, in **Settings > Mods** or with **Switch it on
+   are off until you switch them on, in **Mods** or with **Switch it on
    in the game**.)
 5. **Press Export the mod pack.** It writes `rockets.pck` into the game's mods
    folder, where the installed game finds it. Set **Copy to** to also put it
@@ -273,9 +279,31 @@ The script extends `PartyMode` (`party/party_mode.gd`) and overrides the hooks i
 needs: `setup`, `round_started`, `process`, `player_finished` and `score_round`
 (which can change the points of the round). Through `ctl` it can read
 `ctl.slots`, `ctl.players`, `ctl.finished` and `ctl.run_time`, and call
-`ctl.end_round()` and `ctl.say(text)`. The example mod's `sudden_death.gd` is
-about ten lines long. Online, everyone needs a mod that adds modes, like mods
+`ctl.end_round()`, `ctl.say(text)` and `ctl.note(text)`. The example mod's
+`sudden_death.gd` is about ten lines long.
+
+A mode can also hand out the cards itself instead of first come, first served:
+set `custom_pick = true`, then `pick_started(ctl)` runs when the box is filled
+and `process_pick(ctl, delta)` every frame of picking. It fills `ctl.picks`
+(slot -> card index in `ctl.box`), can read `ctl.cursors` (the card each player
+stands on) and `ctl.pressed(slot, "action_1")`, calls `ctl.update_box()` after
+changes, and `ctl.start_place()` when done. `mods/auction/auction.gd` does this. Online, everyone needs a mod that adds modes, like mods
 that add items.
+
+### Looks
+
+Things players wear, chosen per player in **Mods > Looks**:
+
+```json
+"cosmetics": {
+  "top_hat": { "name": "Top hat", "picture": "top_hat.png", "slot": "head", "offset": [0, -8] },
+  "sunglasses": { "name": "Sunglasses", "picture": "sunglasses.png", "slot": "face" }
+}
+```
+
+Pictures are 32x32, drawn over the robot (same size and place as its body).
+`"head"` stays put, `"face"` moves with the eyes. `offset` moves it, in pixels
+of the picture. The look's id is `<mod>.<name>` with `-` for `_`: `hats.top-hat`.
 
 ### Textures
 
@@ -293,15 +321,30 @@ Texture changes show up after restarting the game.
 
 ## Online
 
-To join an online game, you need every mod with **items or modes** the host has
-switched on, and every **mod pack with maps**, with the same version. Otherwise
-the game says which mods are missing. Raise `version` in `mod.json` when you
+To join an online game, you need every mod with **items, modes or looks** the
+host has switched on, and every **mod pack with maps**, with the same version.
+If you're missing some, the host offers to send them: say yes and they're
+downloaded and on for that game only (they're kept in `mods_net/`, apart from
+your own mods, and switched off when you leave). Raise `version` in `mod.json` when you
 share a new version. Map files from mod folders travel with the game, and
 textures are only looks, so mod folders with just maps or textures are never
 needed by other players.
 
 **Only install mods you trust.** Mods run their scripts like the game's own.
-Bot Party never downloads mods: in online games everybody installs them.
+Bot Party always asks before downloading one.
+
+## Sharing on Explore
+
+**Mods > Explore** lists GitHub repositories with the topic `bot-party-mod`. To
+be listed:
+
+1. Put your mod on GitHub, and add the topic `bot-party-mod` (the gear next to
+   **About** on the repository's page).
+2. Make a release with your `.pck` attached (only the first `.pck` is used).
+   Explore installs the latest release; its downloads count for the
+   **Downloads** sort.
+
+The repository's name, description and stars show in the list.
 
 ## Licenses
 

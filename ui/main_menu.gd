@@ -54,6 +54,7 @@ func _ready() -> void:
 	GameState.joined_changed.connect(func(): _refresh_footer(); if _screen == "players": _lobby.queue_redraw())
 	Net.status.connect(func(t): _hint.text = t)
 	Net.connected.connect(func(): if _screen in ["online", "servers"]: _show("online_lobby"))
+	Net.roster_changed.connect(func(): if is_inside_tree() and _screen == "mods_offer" and Net.computers.has(Net.my_id()): _show("online_lobby"))
 	Net.failed.connect(func(reason):
 		if is_inside_tree() and _screen in ["online", "servers", "online_lobby"]:
 			_show("online")
@@ -66,6 +67,13 @@ func _ready() -> void:
 		elif _screen == "kick" and not Net.computers.has(_kick_peer):
 			_show("online_lobby" if Net.is_online() else "online"))
 	Net.servers_listed.connect(_on_servers)
+	Net.mods_offered.connect(func(list):
+		if is_inside_tree():
+			_mods_offer = list
+			_show("mods_offer"))
+	Net.mods_progress.connect(func(done, total):
+		if is_inside_tree():
+			_hint.text = "Downloading the mods: %d %%" % roundi(100.0 * done / maxf(1.0, total)))
 	# Coming back from a level while online: straight to the online lobby.
 	_show("online_lobby" if Net.is_online() else "main")
 
@@ -192,6 +200,8 @@ func _show(screen: String, keep_index := false) -> void:
 				{"text": "Party", "on_accept": func(): _show("party"), "info": "Place traps. Reach the flag."},
 				{"text": "Online", "on_accept": func(): _show("online"), "info": "Play with friends on other computers."},
 				{"text": "Players", "on_accept": func(): _show("players")},
+				{"text": "Mods", "on_accept": func(): _show("mods"), "info": "Items, maps, game modes, hats and textures made by players.",
+					"enabled": not Net.is_online()},
 				{"text": "Settings", "on_accept": func(): _show("settings")},
 			]
 			if OS.get_name() != "Web":
@@ -327,6 +337,18 @@ func _show(screen: String, keep_index := false) -> void:
 				_items = [{"text": "Chat", "on_accept": func(): get_node("/root/Chat").open(), "info": "Talk to the others (C or / anywhere while online)."},
 					_name_item(),
 					{"text": "Leave", "on_accept": func(): Net.leave(); _show("online")}]
+		"mods_offer":
+			# The host can send the mods its game needs: they run code, so ask.
+			var lines := []
+			var total := 0
+			for o in _mods_offer:
+				lines.append("- %s %s (%s)" % [o.name, o.version, _size_text(int(o.size))])
+				total += int(o.size)
+			var info := "This game needs:\n%s\n\nMods run code on your computer: say yes only if you trust the host. They're on for this game only." % "\n".join(lines)
+			_items = [
+				{"text": "Download and join", "info": info, "on_accept": func(): _hint.text = "Downloading the mods..."; Net.accept_mods(true)},
+				{"text": "Don't join", "info": info, "on_accept": func(): Net.accept_mods(false); _show("online")},
+			]
 		"kick":
 			var who := str(Net.computers.get(_kick_peer, "?"))
 			_items = [
@@ -350,8 +372,6 @@ func _show(screen: String, keep_index := false) -> void:
 					"info": "Explosions (bombs, nukes, black holes) shake the screen."},
 				{"text": "Controls", "on_accept": func(): _show("controls"), "info": "Change the keys of each player." if not Net.is_online() else "Change the keys before going online.",
 					"enabled": not Net.is_online()},
-				{"text": "Mods", "on_accept": func(): _show("mods"), "info": "Items, maps and textures made by players.",
-					"enabled": not Net.is_online()},
 				{"text": "Data folder", "on_accept": func(): _open_folder(OS.get_user_data_dir()),
 					"info": "Your saves, settings, maps and mods:\n%s" % OS.get_user_data_dir()},
 				{"text": "Game folder", "on_accept": func(): _open_folder(_game_folder()),
@@ -374,6 +394,14 @@ func _show(screen: String, keep_index := false) -> void:
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"mods":
 			Mods.scan()
+			_items.append({"text": "Explore", "on_accept": func(): _explore(),
+				"info": "Mods shared on GitHub (repositories tagged \"%s\"): pick one to install it." % Mods.TOPIC})
+			_items.append({"text": "Browse...", "on_accept": func(): _browse_pack(),
+				"info": "Install a mod pack (.pck) from your computer."})
+			_items.append({"text": "Looks", "on_accept": func(): _show("looks"),
+				"info": "Hats and other cosmetics from mods: who wears what."})
+			if not Mods.mods.is_empty():
+				_items.append({"text": "Installed", "enabled": false, "size": 26, "heading": true})
 			for m in Mods.mods:
 				var mod: Dictionary = m
 				_items.append({"text": mod.name.left(16), "size": 34,
@@ -383,9 +411,59 @@ func _show(screen: String, keep_index := false) -> void:
 			_items.append({"text": "Open mods folder", "on_accept": func(): Mods.open_folder(),
 				"info": "Put mod packs (.pck) or mod folders here:\n%s\nThen come back to this screen." % ProjectSettings.globalize_path(Mods.DIR)})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
+		"mods_explore":
+			_items.append({"text": "Search: " + (_explore_search.left(14) if _explore_search != "" else "all"), "size": 34,
+				"info": "Words to look for in the mods' names and descriptions.\nJump: type them (empty: all).",
+				"on_accept": func(): _edit_text("Search mods", _explore_search, func(t): _explore_search = t.strip_edges(); _explore())})
+			var cycle_sort := func(d: int):
+				var sorts: Array = Mods.EXPLORE_SORTS
+				_explore_sort = sorts[posmod(sorts.find(_explore_sort) + d, sorts.size())]
+				_explore()
+			_items.append({"text": "Sort: " + _explore_sort, "size": 34,
+				"info": "Left / right: by stars, date (last update), name or downloads.",
+				"on_left": func(): cycle_sort.call(-1), "on_right": func(): cycle_sort.call(1), "on_accept": func(): cycle_sort.call(1)})
+			if _explore_list.is_empty():
+				_items.append({"text": "Looking..." if _exploring else "No mods found", "enabled": false})
+			for r in _explore_list:
+				var repo: Dictionary = r
+				var installed := not Mods.get_mod(ArenaMap.slug(repo.name)).is_empty()
+				_items.append({"text": repo.name.left(18), "size": 34,
+					"info": "%s\nby %s  ·  %d star%s%s  ·  %s%s\n\nJump: install it (its latest release).\nOnly install mods you trust: they run their own code." % [
+						repo.description.left(160), repo.author, repo.stars, "" if repo.stars == 1 else "s",
+						("  ·  %d downloads" % repo.downloads) if int(repo.get("downloads", -1)) >= 0 else "",
+						repo.get("updated", ""), "\n(installed)" if installed else ""],
+					"on_accept": func(): _install_repo(repo)})
+			_items.append({"text": "Refresh", "on_accept": func(): _explore()})
+			_items.append({"text": "Back", "on_accept": func(): _back()})
+		"looks":
+			var all: Dictionary = Mods.cosmetics()
+			var ids := all.keys()
+			ids.sort()
+			ids.push_front("")
+			if all.is_empty():
+				_items.append({"text": "No cosmetics", "enabled": false, "info": "Switch on a mod that has some (like Hats) in Mods."})
+			else:
+				for slot in range(1, GameState.MAX_PLAYERS + 1):
+					var s := slot
+					var cycle := func(d: int):
+						var at := ids.find(GameState.look_of(s))
+						var looks: Dictionary = GameState.settings.get("looks", {})
+						looks[str(s)] = ids[posmod(at + d, ids.size())]
+						GameState.settings.looks = looks
+						GameState.save_settings()
+						_show("looks", true)
+					var cur := GameState.look_of(s)
+					var item := {"text": "P%d" % s, "size": 34,
+						"value": func(): return "< %s >" % (str(all[cur].name).left(14) if all.has(cur) else "None"),
+						"on_left": func(): cycle.call(-1), "on_right": func(): cycle.call(1), "on_accept": func(): cycle.call(1),
+						"info": "What P%d's robot wears (the key set %d, online too).\nLeft / right: change." % [s, s]}
+					if all.has(cur):
+						item.icon = Mods.look_texture(cur)
+					_items.append(item)
+			_items.append({"text": "Back", "on_accept": func(): _back()})
 	_heading.text = {"main": "", "campaign": _campaign_heading(), "party": "Party", "party_items": "Party items", "party_rules": "Party rules", "players": "Players",
-		"settings": "Settings", "controls": "Controls", "mods": "Mods", "online": "Online", "servers": "Server list", "online_lobby": _online_heading(),
-		"kick": "Kick or ban %s" % str(Net.computers.get(_kick_peer, "?"))}[screen]
+		"settings": "Settings", "controls": "Controls", "mods": "Mods", "mods_explore": "Explore mods", "looks": "Looks", "online": "Online", "servers": "Server list", "online_lobby": _online_heading(),
+		"kick": "Kick or ban %s" % str(Net.computers.get(_kick_peer, "?")), "mods_offer": "Mods for this game"}[screen]
 	if not keep_index:
 		_index = 0
 	_index = clampi(_index, 0, _items.size() - 1)
@@ -551,6 +629,13 @@ func _game_folder() -> String:
 
 var _servers: Array = []
 var _kick_peer := 0  # host: whose computer the Kick / ban screen is about
+var _mods_offer: Array = []  # client: the mods the host can send
+
+
+static func _size_text(bytes: int) -> String:
+	if bytes >= 1024 * 1024:
+		return "%.1f MB" % (bytes / 1048576.0)
+	return "%d KB" % maxi(1, bytes / 1024)
 var _online_bot_skill := 1  # host: how good the bots added online are
 var _lobby_focus := "menu"  # online lobby: "menu" (the options) or "players" (your box)
 
@@ -735,6 +820,62 @@ func _toggle(key: String) -> void:
 
 # --- Input --------------------------------------------------------------------
 
+# --- Mods > Explore / Browse ---------------------------------------------------------
+
+var _explore_list: Array = []
+var _exploring := false
+var _explore_search := ""
+var _explore_sort := "Stars"
+
+
+func _explore() -> void:
+	_exploring = true
+	_explore_list = []
+	_show("mods_explore", _screen == "mods_explore")
+	Mods.explore(func(list: Array, err: String):
+		_exploring = false
+		_explore_list = list
+		if is_inside_tree() and _screen == "mods_explore":
+			_show("mods_explore", true)
+			if err != "":
+				_hint.text = err, _explore_search, _explore_sort)
+
+
+func _install_repo(repo: Dictionary) -> void:
+	_hint.text = "Downloading %s..." % repo.name
+	Mods.install_from_repo(repo.full_name, func(err: String):
+		if not is_inside_tree():
+			return
+		_hint.text = err if err != "" else "%s is installed and on" % repo.name
+		if _screen == "mods_explore":
+			_show("mods_explore", true))
+
+
+## Mods > Browse: pick a mod pack on this computer.
+func _browse_pack() -> void:
+	var done := func(path: String):
+		var err: String = Mods.install_pack(path)
+		_hint.text = err if err != "" else "%s is installed and on" % path.get_file()
+		_show("mods", true)
+	if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
+		DisplayServer.file_dialog_show("Install a mod pack", OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS), "", false,
+			DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, PackedStringArray(["*.pck, *.zip ; Mod packs"]),
+			func(ok: bool, paths: PackedStringArray, _filter: int):
+				if ok and not paths.is_empty():
+					done.call(paths[0]))
+		return
+	var dialog := FileDialog.new()
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dialog.filters = PackedStringArray(["*.pck, *.zip ; Mod packs"])
+	dialog.current_dir = OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS)
+	dialog.title = "Install a mod pack"
+	dialog.file_selected.connect(func(p): done.call(p); dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered_ratio(0.7)
+
+
 func _toggle_mod(mod: Dictionary) -> void:
 	var count: int = Mods.mods.size()
 	Mods.set_enabled(mod.id, not mod.enabled)
@@ -756,6 +897,8 @@ func _mod_info(mod: Dictionary) -> String:
 		adds.append("%d item%s" % [mod.items.size(), "s" if mod.items.size() > 1 else ""])
 	if not mod.get("modes", {}).is_empty():
 		adds.append("%d mode%s" % [mod.modes.size(), "s" if mod.modes.size() > 1 else ""])
+	if not mod.get("cosmetics", {}).is_empty():
+		adds.append("%d cosmetic%s" % [mod.cosmetics.size(), "s" if mod.cosmetics.size() > 1 else ""])
 	if mod.maps != "":
 		adds.append("maps")
 	if not mod.textures.is_empty():
@@ -828,13 +971,17 @@ func _back() -> void:
 	if _screen == "kick":
 		_show("online_lobby")
 		return
+	if _screen == "mods_offer":
+		Net.accept_mods(false)
+		_show("online")
+		return
 	if _screen == "servers":
 		_show("online")
 		_select(2)
 		return
-	if _screen in ["party_items", "party_rules", "mods", "controls"]:
-		var text: String = {"party_items": "Items", "party_rules": "Rules", "mods": "Mods", "controls": "Controls"}[_screen]
-		_show({"party_items": "party", "party_rules": "party", "mods": "settings", "controls": "settings"}[_screen])
+	if _screen in ["party_items", "party_rules", "controls", "mods_explore", "looks"]:
+		var text: String = {"party_items": "Items", "party_rules": "Rules", "controls": "Controls", "mods_explore": "Explore", "looks": "Looks"}[_screen]
+		_show({"party_items": "party", "party_rules": "party", "controls": "settings", "mods_explore": "mods", "looks": "mods"}[_screen])
 		for i in _items.size():
 			if _items[i].text == text:
 				_select(i)
@@ -845,7 +992,7 @@ func _back() -> void:
 			if _items[i].text == "Party":
 				_select(i)
 		return
-	var back_to := {"campaign": 0, "party": 1, "online": 2, "players": 3, "settings": 4}
+	var back_to := {"campaign": 0, "party": 1, "online": 2, "players": 3, "mods": 4, "settings": 5}
 	var idx: int = back_to.get(_screen, 0)
 	_show("main")
 	_select(idx)

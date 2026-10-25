@@ -22,8 +22,9 @@ or against bots.
 - **Online:** host a game for your friends, or find one on the server list.
   Several people can play on each computer.
 - **Bots** to play against, from easy to hard.
-- **Map editor** for party arenas, and **mods** for new items, maps, textures
-  and game modes.
+- **Map editor** for party arenas, and **mods** for new items, maps, textures,
+  game modes and looks (hats!). Find them in **Mods → Explore**; online, the host
+  sends the mods you're missing.
 
 ## Install
 
@@ -136,9 +137,10 @@ bot-party -- --help
   tools. Press **Save map**, or press F6 to play it.
 - **Mods** add items, maps, textures and game modes. Make them in Godot with
   `editor/mod_kit.tscn`: your scenes and scripts become a mod pack (`.pck`) that
-  players drop in their mods folder and switch on in **Settings → Mods**. Map
+  players install from **Mods** (Explore or Browse) and switch on there. Map
   scenes in a pack can hold any Godot nodes. See [MODDING.md](MODDING.md) and the
-  example in `mods/example` (its pack is on the Releases page).
+  examples in `mods/example`, `mods/hats` and `mods/auction` (their packs are on
+  the Releases page).
 
 ![Map editor](docs/screenshots/editor.png)
 

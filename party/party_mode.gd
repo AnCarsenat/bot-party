@@ -11,10 +11,25 @@ extends RefCounted
 ## Shown in Party > Rules.
 var name := "Classic"
 var description := "Reach the flag. Traps you placed score when they get someone."
+## True: the mode hands out the cards itself (process_pick), not first come first served.
+var custom_pick := false
 
 
 ## The party starts (once, in the arena).
 func setup(_ctl: Node) -> void:
+	pass
+
+
+## The box is filled (ctl.box: item ids), picking starts.
+func pick_started(_ctl: Node) -> void:
+	pass
+
+
+## Every frame of picking, when custom_pick is true. Fill ctl.picks (slot -> index
+## in ctl.box), use ctl.pressed(slot, "action_1"), ctl.cursors (slot -> card
+## they stand on), ctl.update_box(), ctl.say() / ctl.note(), and call
+## ctl.start_place() when done (players without a card place nothing).
+func process_pick(_ctl: Node, _delta: float) -> void:
 	pass
 
 
