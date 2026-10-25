@@ -238,10 +238,6 @@ func _show(screen: String, keep_index := false) -> void:
 				"value": func(): return onoff.call("coins"), "on_left": func(): flip.call("coins"), "on_right": func(): flip.call("coins"), "on_accept": func(): flip.call("coins")})
 			_items.append({"text": "Surprises", "info": "Some rounds get a surprise rule (low gravity, speedy...).",
 				"value": func(): return onoff.call("surprises"), "on_left": func(): flip.call("surprises"), "on_right": func(): flip.call("surprises"), "on_accept": func(): flip.call("surprises")})
-			_items.append({"text": "Specials", "info": "Special crates in the box: each gives a special item (big ferris wheel, bear trap, black hole...). Party > Items lists them.",
-				"value": func(): return "< %s >" % Party.SPECIAL_NAMES[clampi(int(r.specials), 0, 2)],
-				"on_left": func(): step.call("specials", -1, 0, 2), "on_right": func(): step.call("specials", 1, 0, 2),
-				"on_accept": func(): r.specials = (int(r.specials) + 1) % 3; Party.save_weights(); _refresh_info()})
 			_items.append({"text": "Equal odds", "info": "Every item that's on is as likely as the others (ignores Party > Items odds).",
 				"value": func(): return onoff.call("equal_odds"), "on_left": func(): flip.call("equal_odds"), "on_right": func(): flip.call("equal_odds"), "on_accept": func(): flip.call("equal_odds")})
 			_items.append({"text": "Reset", "info": "Back to the usual rules.", "on_accept": func():
@@ -257,7 +253,13 @@ func _show(screen: String, keep_index := false) -> void:
 				_items.append({"text": "Special items" if group else "Items", "enabled": false, "size": 26, "heading": true})
 				for id in ids:
 					_items.append(_item_row(id))
-			_items.append({"text": "Reset", "on_accept": func(): Party.reset_weights(); _refresh_info(), "info": "Back to the default odds."})
+				if not group:
+					_items.append(_special_crate_row())
+			_items.append({"text": "Reset", "on_accept": func():
+				Party.reset_weights()
+				Party.rules.specials = Party.RULE_DEFAULTS.specials
+				Party.save_weights()
+				_refresh_info(), "info": "Back to the default odds."})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"players":
 			_items = [{"text": "Done", "on_accept": func(): _back()}]
@@ -655,6 +657,24 @@ func _close_editor() -> void:
 func _campaign_heading() -> String:
 	var c: Dictionary = GameState.campaign()
 	return "Campaign: %s" % c.name
+
+
+## Party > Items: how often a card in the box is a Special crate (off, rare,
+## often): the "specials" rule.
+func _special_crate_row() -> Dictionary:
+	var r: Dictionary = Party.rules
+	var set_to := func(v: int):
+		r.specials = clampi(v, 0, 2)
+		Party.save_weights()
+		_refresh_info()
+	return {"text": "Special card", "icon": Party.icon("special"), "size": 34,
+		"info": "How often a card in the box is a Special crate (it gives one of the special items below): off, rare or often.\nLeft / right: how often\nJump: on / off",
+		"value": func():
+			var v := clampi(int(r.specials), 0, 2)
+			return {"text": "Off" if v == 0 else "%d%%" % roundi(Party.SPECIAL_ODDS[v] * 100.0), "bar": v / 2.0},
+		"on_left": func(): set_to.call(int(r.specials) - 1),
+		"on_right": func(): set_to.call(int(r.specials) + 1),
+		"on_accept": func(): set_to.call(0 if int(r.specials) > 0 else 1)}
 
 
 func _item_value(id: String) -> Dictionary:
