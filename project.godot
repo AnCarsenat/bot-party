@@ -29,7 +29,6 @@ online/server_list="5.78.71.45"
 
 Mods="*res://mods/mods.gd"
 DebugView="*res://core/debug_view.gd"
-AmbientSfx="*res://audio/ambient_sfx.tscn"
 Music="*res://audio/music_player.gd"
 Transition="*res://core/transition.gd"
 GameState="*res://core/game_state.gd"

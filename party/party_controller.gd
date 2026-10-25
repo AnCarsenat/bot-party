@@ -315,7 +315,7 @@ func _on_roster_changed() -> void:
 	var net := get_tree().root.get_node_or_null("Net")
 	if net == null or not net.is_host():
 		return  # (closing the game: nothing to tidy)
-	var live := []
+	var live: Array = net.bots.keys()  # (the host's bots stay)
 	for r in net.roster:
 		live.append(int(r.slot))
 	var gone := slots.filter(func(s): return not s in live)

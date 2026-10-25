@@ -262,14 +262,21 @@ func new_session(players: Array, choice := "") -> void:
 	# Bots, in their own slots. Each gets a way of playing for this party.
 	var bots := {}
 	var styles := {}
-	if not get_node("/root/Net").is_online():
+	var net := get_node("/root/Net")
+	# Offline: the bots set up on the Players screen; online: the host's bots.
+	var want: Dictionary = {}
+	if not net.is_online():
 		for s in bot_slots():
-			if not s in session.players and session.players.size() < GameState.MAX_PLAYERS:
-				session.players.append(s)
-				session.scores[str(s)] = 0
-				bots[str(s)] = bot_list[s]
-				styles[str(s)] = PartyBot.STYLES[randi() % PartyBot.STYLES.size()]
-		session.players.sort()
+			want[s] = bot_list[s]
+	elif net.is_host():
+		want = net.bots
+	for s in want:
+		if not s in session.players and session.players.size() < GameState.MAX_PLAYERS:
+			session.players.append(s)
+			session.scores[str(s)] = 0
+			bots[str(s)] = want[s]
+			styles[str(s)] = PartyBot.STYLES[randi() % PartyBot.STYLES.size()]
+	session.players.sort()
 	session.bots = bots
 	session.bot_styles = styles
 	session.bot_traits = {}
@@ -439,7 +446,7 @@ func _on_joined_changed() -> void:
 ## In a party, its own bots; in the menus, the bots set up for the next party.
 func label(slot: int) -> String:
 	if get_node("/root/Net").is_online():
-		return get_node("/root/Net").player_label(slot)  # online games have no bots
+		return get_node("/root/Net").player_label(slot)  # names, B1... for the host's bots
 	var list: Array
 	if session.has("bots"):
 		list = session.bots.keys().map(func(k): return int(k))

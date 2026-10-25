@@ -59,6 +59,8 @@ func _ready() -> void:
 			_show("online")
 			_hint.text = reason)
 	Net.roster_changed.connect(func():
+		if not is_inside_tree():
+			return  # (leaving the menu)
 		if _screen == "online_lobby":
 			_show("online_lobby", true)
 		elif _screen == "kick" and not Net.computers.has(_kick_peer):
@@ -335,7 +337,6 @@ func _show(screen: String, keep_index := false) -> void:
 		"settings":
 			_items = [
 				{"text": "Music", "key": "music_volume", "on_left": func(): _bump("music_volume", -0.1), "on_right": func(): _bump("music_volume", 0.1), "on_accept": func(): _bump("music_volume", 0.1, true), },
-				{"text": "Sounds", "key": "sfx_volume", "on_left": func(): _bump("sfx_volume", -0.1), "on_right": func(): _bump("sfx_volume", 0.1), "on_accept": func(): _bump("sfx_volume", 0.1, true)},
 				{"text": "Fullscreen", "key": "fullscreen", "on_left": func(): _toggle("fullscreen"), "on_right": func(): _toggle("fullscreen"), "on_accept": func(): _toggle("fullscreen")},
 				{"text": "Distant players", "key": "distant_players", "on_left": func(): _toggle("distant_players"), "on_right": func(): _toggle("distant_players"), "on_accept": func(): _toggle("distant_players"),
 					"info": "A robot off the screen gets a bubble at the edge with a small view of it."},
@@ -548,6 +549,7 @@ func _game_folder() -> String:
 
 var _servers: Array = []
 var _kick_peer := 0  # host: whose computer the Kick / ban screen is about
+var _online_bot_skill := 1  # host: how good the bots added online are
 var _lobby_focus := "menu"  # online lobby: "menu" (the options) or "players" (your box)
 
 
@@ -556,7 +558,8 @@ func _set_lobby_focus(f: String) -> void:
 	_list.modulate.a = 0.45 if f == "players" else 1.0
 	_cable.visible = f == "menu"
 	if _screen == "online_lobby":
-		_hint.text = ("Jump: join / leave    Left: menu    C: chat" if f == "players"
+		_hint.text = (("Jump: join   Arrows: a place   +: bot / level   Del: remove" if Net.is_host()
+				else "Jump: join / leave    Left: menu    C: chat") if f == "players"
 			else "Right: your players    C: chat") + ("    Waiting for the host to start." if Net.is_client() else "")
 var _listing := false
 var _last_address := ""
@@ -601,7 +604,7 @@ static func _room_waiting(entry: Dictionary) -> bool:
 
 func _online_heading() -> String:
 	if Net.is_host():
-		return "Your game: %d / %d players" % [Net.roster.size(), GameState.MAX_PLAYERS]
+		return "Your game: %d / %d players" % [Net.taken_places(), GameState.MAX_PLAYERS]
 	return ("In %s's game" % Net.name_of(1)) if Net.name_of(1) != "" else "Online"
 
 
@@ -899,6 +902,43 @@ func _unhandled_input(event: InputEvent) -> void:
 				Net.request_join(who)
 			_handled(stick)
 			return
+		var key: Key = event.physical_keycode if event is InputEventKey and event.pressed and not event.echo else KEY_NONE
+		if Net.is_host():
+			# The host picks a place of its box: + adds a bot there (again: its
+			# level changes), Delete takes it away. Like the Players screen.
+			if key in [KEY_INSERT, KEY_EQUAL, KEY_PLUS, KEY_KP_ADD] or _player_action(event, "action_3"):
+				var at := Net.bot_at(_lobby.online_pick)
+				Net.set_bot(_lobby.online_pick, (int(Net.bots[at]) + 1) % 3 if at != 0 else _online_bot_skill)
+				if at == 0 and Net.bot_at(_lobby.online_pick) == 0:
+					_hint.text = "That place is taken (or the game is full)"
+				_handled(stick); return
+			if key in [KEY_DELETE, KEY_BACKSPACE] or _player_action(event, "action_2"):
+				Net.remove_bot_at(_lobby.online_pick)
+				_handled(stick); return
+			var per_row: int = _lobby.layout_row
+			var col := (_lobby.online_pick - 1) % per_row
+			var move := 0
+			if event.is_action_pressed("ui_left", true) or _player_action(event, "move_left"):
+				if col == 0:
+					_set_lobby_focus("menu")
+					_handled(stick); return
+				move = -1
+			elif event.is_action_pressed("ui_right", true) or _player_action(event, "move_right"):
+				move = 1 if col < per_row - 1 else 0
+			elif event.is_action_pressed("ui_up", true) or _player_action(event, "move_up"):
+				move = -per_row
+			elif event.is_action_pressed("ui_down", true) or _player_action(event, "move_down"):
+				move = per_row
+			if move != 0 or event.is_action_pressed("ui_up", true) or event.is_action_pressed("ui_down", true) or event.is_action_pressed("ui_right", true) \
+					or _player_action(event, "move_up") or _player_action(event, "move_down") or _player_action(event, "move_right"):
+				var to: int = _lobby.online_pick + move
+				if to >= 1 and to <= GameState.MAX_PLAYERS:
+					_lobby.online_pick = to
+				_handled(stick); return
+			if event.is_action_pressed("ui_cancel") or event.is_action_pressed("pause"):
+				_set_lobby_focus("menu")
+				_handled(stick)
+			return
 		if event.is_action_pressed("ui_left", true) or _player_action(event, "move_left") \
 				or event.is_action_pressed("ui_cancel") or event.is_action_pressed("pause") or _player_action(event, "action_2"):
 			_set_lobby_focus("menu")
@@ -1138,6 +1178,8 @@ class _Lobby extends Control:
 	var _scroll := 0.0       # online: how far the computers' boxes are scrolled
 	var _scroll_to := 0.0
 	var _scroll_focus := -1
+	var online_pick := 1    # host: the place of its box that + / Delete act on
+	var layout_row := 4     # how the 8 places are laid out (4 x 2, or 8 in a row)
 	var _joined_at := {}
 	var _buttons := []  # [Rect2, Callable] of the selected slot's buttons
 
@@ -1252,7 +1294,7 @@ class _Lobby extends Control:
 				order.append(int(r.peer))
 		if not Net.my_id() in order:
 			order.append(Net.my_id())
-		var free := GameState.MAX_PLAYERS - Net.roster.size()
+		var free := GameState.MAX_PLAYERS - Net.taken_places()
 		var full := free <= 0
 		var n := order.size()
 		# One or two columns of boxes, the 8 places in 4 x 2 or in a row of 8:
@@ -1276,6 +1318,7 @@ class _Lobby extends Control:
 					cols = c
 					per_row = pr
 		var box := Vector2(minf((area.x - gap * (cols - 1)) / cols, 16 + per_row * 160.0 * zoom), 40 + (8 / per_row) * 185.0 * zoom)
+		layout_row = per_row
 		var all_rows := ceili(n / float(cols))
 		if all_rows > 2:
 			box.y = (area.y - gap) / 2.0  # two rows a screen, scrolled a row at a time
@@ -1320,12 +1363,24 @@ class _Lobby extends Control:
 			for e in Net.roster:
 				if int(e.peer) == peer:
 					by_local[int(e.local)] = int(e.slot)
+			# The host's bots are in its box too (each its own level).
+			var bot_here := {}
+			if peer == 1:
+				for b in Net.bot_places:
+					bot_here[int(Net.bot_places[b])] = int(b)
+			var picking: bool = focused and Net.is_host()
 			for i in GameState.MAX_PLAYERS:
 				var local := i + 1
 				var c := r.position + Vector2(8 + ((i % per_row) + 0.5) * 160.0 * zoom, 36 + (95.0 + (i / per_row) * 185.0) * zoom)
+				if picking and local == online_pick:
+					# The place the host's +, Delete act on.
+					draw_rect(Rect2(c + Vector2(-78, -96) * zoom, Vector2(156, 200) * zoom), Color(UiTheme.LIVE, 0.25))
+					draw_rect(Rect2(c + Vector2(-78, -96) * zoom, Vector2(156, 200) * zoom), UiTheme.INK, false, 3.0)
 				draw_set_transform(c, 0.0, Vector2(zoom, zoom))
 				if by_local.has(local):
 					_draw_cell(by_local[local], true, "P%d" % local, "")  # its own number on its computer
+				elif bot_here.has(local):
+					_draw_cell(bot_here[local], true, Net.player_label(bot_here[local]), PartyBot.SKILL_NAMES[int(Net.bots.get(bot_here[local], 1))] + " bot")
 				elif full:
 					_draw_cell(0, false, "", "", true)
 				else:

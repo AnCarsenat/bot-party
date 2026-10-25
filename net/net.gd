@@ -35,6 +35,8 @@ var mode := Mode.OFFLINE
 ## Everyone in the game: [{slot, peer, local, name}]. slot = global player number
 ## (P1..P8), peer = network id (1 = host), local = that computer's own key set.
 var roster: Array = []
+var bots: Dictionary = {}       # host's bots online: slot -> skill (0-2); everyone knows them
+var bot_places: Dictionary = {} # slot -> its place (1-8) in the host's box
 var computers: Dictionary = {}  # peer id -> name: every computer in the game (players or not)
 var typing := false             # typing in the chat: our players stand still
 var banned: Array = []          # host: [{name, ip}] who can't join again while it hosts
@@ -119,8 +121,12 @@ func local_keys_for(slot: int) -> int:
 
 
 ## A player online: its computer's name, plus its number there when that
-## computer plays several ("Zoe", "Zoe 2").
+## computer plays several ("Zoe", "Zoe 2"); bots: B1, B2...
 func player_label(slot: int) -> String:
+	if bots.has(slot):
+		var order := bots.keys()
+		order.sort()
+		return "B%d" % (order.find(slot) + 1)
 	for r in roster:
 		if int(r.slot) == slot:
 			var same := roster.filter(func(o): return int(o.peer) == int(r.peer)).size()
@@ -326,7 +332,7 @@ func _add_player(peer: int, local_slot: int, who: String) -> int:
 	for r in roster:
 		if int(r.peer) == peer and int(r.local) == local_slot:
 			return int(r.slot)
-	var used := []
+	var used := bots.keys().map(func(s): return int(s))
 	for r in roster:
 		used.append(int(r.slot))
 	if used.size() >= GameState.MAX_PLAYERS:
@@ -349,6 +355,8 @@ func _add_player(peer: int, local_slot: int, who: String) -> int:
 ## Host's own players joining / leaving in the online lobby (by key set: the
 ## game slot is whichever is free).
 func host_local_join(local_slot: int) -> void:
+	if bot_at(local_slot) != 0:
+		remove_bot_at(local_slot)  # a player takes the bot's place
 	if _add_player(1, local_slot, player_name) != 0:
 		_roster_updated()
 
@@ -366,9 +374,9 @@ func _roster_updated() -> void:
 	_apply_joined()
 	if is_host():
 		_set_roster.rpc(roster)
-		_set_computers.rpc(computers)
+		_set_computers.rpc(computers, bots, bot_places)
 		if _lobby.registered():
-			_lobby.heartbeat(roster.size(), _mode_text(), room_names())
+			_lobby.heartbeat(taken_places(), _mode_text(), room_names())
 	roster_changed.emit()
 
 
@@ -561,9 +569,71 @@ func _on_server_gone() -> void:
 
 ## Host -> clients: every computer in the game (even without a player yet).
 @rpc("authority", "call_remote", "reliable")
-func _set_computers(c: Dictionary) -> void:
+func _set_computers(c: Dictionary, b := {}, places := {}) -> void:
 	computers = c
+	bots = {}
+	for k in b:
+		bots[int(k)] = int(b[k])
+	bot_places = {}
+	for k in places:
+		bot_places[int(k)] = int(places[k])
 	roster_changed.emit()
+
+
+# --- Bots (host) --------------------------------------------------------------
+# The host's computer runs them (party only); they take places like players.
+
+## Places taken (players and bots).
+func taken_places() -> int:
+	return roster.size() + bots.size()
+
+
+## The bot at place `place` of the host's box (its game slot), or 0.
+func bot_at(place: int) -> int:
+	for s in bot_places:
+		if int(bot_places[s]) == place:
+			return int(s)
+	return 0
+
+
+## Host: a bot at place `place` of its box (or that bot's level changed).
+func set_bot(place: int, skill: int) -> bool:
+	if not is_host() or place < 1 or place > GameState.MAX_PLAYERS:
+		return false
+	var at := bot_at(place)
+	if at != 0:
+		bots[at] = clampi(skill, 0, 2)
+		_roster_updated()
+		return true
+	for r in roster:
+		if int(r.peer) == 1 and int(r.local) == place:
+			return false  # one of our players is there
+	if taken_places() >= GameState.MAX_PLAYERS:
+		return false
+	var used := bots.keys()
+	for r in roster:
+		used.append(int(r.slot))
+	var slot := place if not place in used else 0
+	if slot == 0:
+		for s in range(1, GameState.MAX_PLAYERS + 1):
+			if not s in used:
+				slot = s
+				break
+	bots[slot] = clampi(skill, 0, 2)
+	bot_places[slot] = place
+	_announce("A bot joined (%s)" % PartyBot.SKILL_NAMES[bots[slot]])
+	_roster_updated()
+	return true
+
+
+func remove_bot_at(place: int) -> void:
+	var slot := bot_at(place)
+	if not is_host() or slot == 0:
+		return
+	bots.erase(slot)
+	bot_places.erase(slot)
+	_release_slot(slot)
+	_roster_updated()
 
 
 # --- Names ---------------------------------------------------------------------
@@ -710,6 +780,8 @@ func leave() -> void:
 	mode = Mode.OFFLINE
 	roster.clear()
 	computers.clear()
+	bots.clear()
+	bot_places.clear()
 	_reset_sync()
 	_last_input.clear()
 	if was_online and not _offline_joined.is_empty():
@@ -763,7 +835,7 @@ func allow_scene_change(path: String, message: String, message_time: float) -> b
 		_reset_sync()
 		_load_scene.rpc(path, message, message_time, _scene_token, _scene_extra(path))
 		if _lobby.registered():
-			_lobby.heartbeat.call_deferred(roster.size(), _mode_text(), room_names())
+			_lobby.heartbeat.call_deferred(taken_places(), _mode_text(), room_names())
 		return true
 	if is_client():
 		return _applying
@@ -1175,11 +1247,15 @@ func list_servers() -> void:
 
 func lobby_heartbeat() -> void:
 	if is_host() and _lobby.registered():
-		_lobby.heartbeat(roster.size(), _mode_text(), room_names())
+		_lobby.heartbeat(taken_places(), _mode_text(), room_names())
 
 
 ## Who is in this game, one name per computer ("Alice x2" for two players on one keyboard).
 func room_names() -> Array:
+	return _room_names() + (["%d bot%s" % [bots.size(), "" if bots.size() == 1 else "s"]] if not bots.is_empty() else [])
+
+
+func _room_names() -> Array:
 	var count := {}
 	var order := []
 	for r in roster:
