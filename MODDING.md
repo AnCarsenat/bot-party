@@ -303,6 +303,29 @@ needed by other players.
 **Only install mods you trust.** Mods run their scripts like the game's own.
 Bot Party never downloads mods: in online games everybody installs them.
 
+## Licenses
+
+Your mods are yours: share them under any license you like (or none).
+
+Bot Party's code is under the GNU GPL version 3 ([LICENSE](LICENSE)), and mods
+use it (their scripts extend the game's classes). So that this never gets in
+your way, the code comes with an **additional permission**, under section 7 of
+the GPL:
+
+> As an additional permission under section 7 of the GNU GPL version 3, the
+> copyright holders of Bot Party's code allow **mods** (content the game loads
+> at run time from the player's mods folder or from a `.pck` mod pack: scripts,
+> scenes, maps, images, sounds, `mod.json`) to be made and distributed under
+> any license their authors choose, even though they use or extend Bot Party's
+> code and classes. This permission doesn't cover files copied from Bot Party
+> into a mod: those keep their own licenses (code: GPL; art: CC BY-NC-SA 4.0,
+> see [ASSETS-LICENSE.md](ASSETS-LICENSE.md)).
+
+If your mod reuses Bot Party's art (a sprite, a texture), that part follows the
+art license: credit "Bot Party by AnCarsenat", non-commercial, same license.
+The name "Bot Party" and its logo are not licensed: call your mod "a mod for
+Bot Party", not "Bot Party".
+
 ## When something's wrong
 
 The Mods screen shows problems under the mod's name: broken JSON, a missing file,

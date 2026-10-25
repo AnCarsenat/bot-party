@@ -80,9 +80,16 @@ jobs:
           ~/godot/godot --headless --path . --export-release "macOS" export/macos/BotParty.zip
           N="${{ steps.ver.outputs.name }}"
           cp player/icon.png export/linux/BotParty.png   # for the menu entry (install.sh)
+          # Licenses travel with the game (GPL: say where the source is).
+          for d in export/linux export/windows; do
+            cp LICENSE ASSETS-LICENSE.md CREDITS.md ui/fonts/Jersey-OFL.txt "$d/"
+            echo "Bot Party $N. Source code: https://github.com/${{ github.repository }}/tree/${{ github.sha }}" > "$d/SOURCE.txt"
+          done
           (cd export/linux && chmod +x BotParty.x86_64 && zip -q -r "../../dist/BotParty-$N-linux.zip" .)
           (cd export/windows && zip -q -r "../../dist/BotParty-$N-windows.zip" .)
           cp export/macos/BotParty.zip "dist/BotParty-$N-macos.zip"
+          (cp LICENSE ASSETS-LICENSE.md CREDITS.md ui/fonts/Jersey-OFL.txt export/linux/SOURCE.txt export/macos/ && cd export/macos \
+            && zip -q "../../dist/BotParty-$N-macos.zip" LICENSE ASSETS-LICENSE.md CREDITS.md Jersey-OFL.txt SOURCE.txt)
           # The example mod, as a mod pack (goes in the game's mods folder).
           ~/godot/godot --headless --path . --script res://editor/pack_mod.gd -- res://mods/example dist/example.pck
           ls -la dist

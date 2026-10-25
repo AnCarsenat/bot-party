@@ -164,6 +164,19 @@ bot-party -- --help
 Every push to `main` builds the game and updates the nightly release. Pushing a
 `v*` tag makes a release. See [BUILDING.md](BUILDING.md).
 
+## License
+
+- **Code**: [GNU GPL version 3](LICENSE) (or any later version), with an extra
+  permission for mods. You can study, change and share it; versions you share
+  must stay under the GPL, with their source.
+- **Art** (images, sounds): [CC BY-NC-SA 4.0](ASSETS-LICENSE.md): share and
+  remix them with credit, not commercially, under the same license.
+- **The name "Bot Party" and its logo**: all rights reserved. Forks are welcome
+  under another name.
+- **Mods** you make are yours: see [MODDING.md](MODDING.md#licenses).
+
+Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Credits
 
 - Game by AnCarsenat.
@@ -171,3 +184,4 @@ Every push to `main` builds the game and updates the nightly release. Pushing a
 - Fonts: [Jersey 10 and Jersey 15](https://github.com/scfried/soft-type-jersey)
   by The Soft Type Project Authors, under the SIL Open Font License. See
   `ui/fonts/`.
+- More in [CREDITS.md](CREDITS.md).
