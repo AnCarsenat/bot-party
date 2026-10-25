@@ -18,6 +18,7 @@ signal status(text: String)
 signal connected                    ## client: joined the host
 signal failed(reason: String)       ## client: couldn't join / lost the host
 signal servers_listed(list: Array)  ## server list arrived (or [] on error)
+signal chat_received(who: String, text: String)  ## who = "" for the game's own messages
 
 enum Mode { OFFLINE, HOST, CLIENT }
 
@@ -35,6 +36,7 @@ var mode := Mode.OFFLINE
 ## (P1..P8), peer = network id (1 = host), local = that computer's own key set.
 var roster: Array = []
 var computers: Dictionary = {}  # peer id -> name: every computer in the game (players or not)
+var typing := false             # typing in the chat: our players stand still
 var banned: Array = []          # host: [{name, ip}] who can't join again while it hosts
 ## Who you are, and where the server list lives (saved in user://online.cfg).
 var player_name := "Player"
@@ -116,6 +118,16 @@ func local_keys_for(slot: int) -> int:
 	return my_slots().get(slot, 0)
 
 
+## A player online: its computer's name, plus its number there when that
+## computer plays several ("Zoe", "Zoe 2").
+func player_label(slot: int) -> String:
+	for r in roster:
+		if int(r.slot) == slot:
+			var same := roster.filter(func(o): return int(o.peer) == int(r.peer)).size()
+			return str(r.name) if same == 1 else "%s %d" % [r.name, int(r.local)]
+	return "P%d" % slot
+
+
 func name_of(slot: int) -> String:
 	for r in roster:
 		if int(r.slot) == slot:
@@ -137,7 +149,14 @@ func host(public: bool) -> Error:
 	_peer = ENetMultiplayerPeer.new()
 	var err := ERR_CANT_CREATE
 	var port := host_port
-	for k in 5:
+	for k in 10:
+		# A quiet look first: ENet prints an error for every port it can't open
+		# (another game on this computer already uses it).
+		var probe := PacketPeerUDP.new()
+		var free := probe.bind(host_port + k, "*") == OK
+		probe.close()
+		if not free:
+			continue
 		err = _peer.create_server(host_port + k, MAX_CLIENTS)
 		if err == OK:
 			_peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
@@ -148,6 +167,7 @@ func host(public: bool) -> Error:
 		return err
 	multiplayer.multiplayer_peer = _peer
 	mode = Mode.HOST
+	_take_keys()
 	_offline_joined = GameState.joined.duplicate()
 	roster.clear()
 	computers = {1: player_name.left(16)}
@@ -203,6 +223,8 @@ func _on_peer_connected(id: int) -> void:
 func _on_peer_disconnected(id: int) -> void:
 	if not is_host():
 		return
+	if computers.has(id):
+		_announce("%s left" % str(computers[id]))
 	computers.erase(id)
 	var gone := []
 	for r in roster.duplicate():
@@ -210,7 +232,7 @@ func _on_peer_disconnected(id: int) -> void:
 			roster.erase(r)
 			gone.append(int(r.slot))
 	for s in gone:
-		_restore_keys(s)
+		_release_slot(s)
 		var scene := get_tree().current_scene
 		var p := scene.get_node_or_null("Player%d" % s) if scene else null
 		if p:
@@ -233,6 +255,7 @@ func _hello(who: String, local_slots: Array, their_mods := []) -> void:
 		_refused.rpc_id(id, "You need these mods to join: " + missing)
 		return
 	computers[id] = who.left(16)
+	_announce("%s joined" % who.left(16))
 	for l in local_slots:
 		_add_player(id, int(l), who)
 	_roster_updated()
@@ -280,7 +303,7 @@ func _request_leave(local_slot: int) -> void:
 	for r in roster.duplicate():
 		if int(r.peer) == id and int(r.local) == local_slot:
 			roster.erase(r)
-			_restore_keys(int(r.slot))
+			_release_slot(int(r.slot))
 	_roster_updated()
 
 
@@ -307,8 +330,6 @@ func _add_player(peer: int, local_slot: int, who: String) -> int:
 				slot = s
 				break
 	roster.append({"slot": slot, "peer": peer, "local": local_slot, "name": who})
-	if peer != 1:
-		_erase_keys(slot)
 	# Joining in the middle of a level: drop in (party mode: from the next party).
 	var scene := get_tree().current_scene
 	var spawner := scene.get_node_or_null("PlayerSpawner") if scene else null
@@ -317,19 +338,18 @@ func _add_player(peer: int, local_slot: int, who: String) -> int:
 	return slot
 
 
-## Host's own players joining / leaving in the online lobby.
-func host_local_join(slot: int) -> void:
-	for r in roster:
-		if int(r.slot) == slot:
-			return  # taken by someone online
-	roster.append({"slot": slot, "peer": 1, "local": slot, "name": player_name})
-	_roster_updated()
+## Host's own players joining / leaving in the online lobby (by key set: the
+## game slot is whichever is free).
+func host_local_join(local_slot: int) -> void:
+	if _add_player(1, local_slot, player_name) != 0:
+		_roster_updated()
 
 
-func host_local_leave(slot: int) -> void:
+func host_local_leave(local_slot: int) -> void:
 	for r in roster.duplicate():
-		if int(r.slot) == slot and int(r.peer) == 1:
+		if int(r.local) == local_slot and int(r.peer) == 1:
 			roster.erase(r)
+			_release_slot(int(r.slot))
 	_roster_updated()
 
 
@@ -351,7 +371,61 @@ func _apply_joined() -> void:
 	GameState.joined = slots
 
 
-## Remote players' key sets must not also be played from the host's keyboard.
+# --- Keys while online --------------------------------------------------------
+# Every computer has its own key sets 1-8 (k1_..k8_ actions, copied from the
+# p1_..p8_ keys). The game slots' actions (p1_..p8_) only get pressed for the
+# players each key set plays: Zoe can play with her P1 keys and Elian with his,
+# whatever game slots they got, and nobody's keys move someone else's robot.
+
+func _take_keys() -> void:
+	for l in range(1, GameState.MAX_PLAYERS + 1):
+		for a in ACTIONS:
+			var p := "p%d_%s" % [l, a]
+			var k := "k%d_%s" % [l, a]
+			if not InputMap.has_action(p):
+				continue
+			if InputMap.has_action(k):
+				InputMap.erase_action(k)
+			InputMap.add_action(k, InputMap.action_get_deadzone(p))
+			var events: Array = _erased_events.get(p, InputMap.action_get_events(p))
+			for ev in events:
+				InputMap.action_add_event(k, ev)
+		_erase_keys(l)
+
+
+## This computer's key set `local` as button strengths (ACTIONS order).
+func _keyboard(local: int) -> PackedByteArray:
+	var v := PackedByteArray()
+	if typing:
+		v.resize(ACTIONS.size())
+		return v
+	for a in ACTIONS:
+		var action := "k%d_%s" % [local, a]
+		v.append(roundi(Input.get_action_strength(action) * 255.0) if InputMap.has_action(action) else 0)
+	return v
+
+
+## Our own players: their key sets press their game slots' buttons here.
+var _mirrored := {}  # slot -> last strengths
+func _mirror_keys() -> void:
+	var mine := my_slots()
+	for slot in mine:
+		var v := _keyboard(mine[slot])
+		if _mirrored.get(slot) != v:
+			_mirrored[slot] = v
+			_apply_input(slot, v)
+	for slot in _mirrored.keys():
+		if not mine.has(slot):
+			_mirrored.erase(slot)
+			_release_slot(slot)
+
+
+func _release_slot(slot: int) -> void:
+	for a in ACTIONS:
+		Input.action_release("p%d_%s" % [slot, a])
+
+
+## The keys of a game slot no longer press it directly (while online).
 func _erase_keys(slot: int) -> void:
 	for a in ACTIONS:
 		var action := "p%d_%s" % [slot, a]
@@ -427,6 +501,7 @@ func _start_client(ip: String, port: int, text: String) -> void:
 	_peer.host.compress(ENetConnection.COMPRESS_RANGE_CODER)
 	multiplayer.multiplayer_peer = _peer
 	mode = Mode.CLIENT
+	_take_keys()
 	status.emit(text)
 	var attempt := _peer
 	_connect_timer = get_tree().create_timer(DIRECT_TIMEOUT if not _pending_relay.is_empty() else 10.0)
@@ -495,6 +570,8 @@ func kick(id: int, ban := false) -> void:
 		return
 	if ban:
 		banned.append({"name": str(computers[id]), "ip": _address_of(id)})
+	_announce("%s was %s" % [str(computers[id]), "banned" if ban else "sent out"])
+	computers.erase(id)  # (no "left" message when it goes)
 	_kicked.rpc_id(id, "The host banned you" if ban else "The host sent you out of the game")
 	get_tree().create_timer(0.3).timeout.connect(func():
 		if _peer and id in multiplayer.get_peers():
@@ -543,6 +620,12 @@ func leave() -> void:
 		for e in _erased_events[action]:
 			InputMap.action_add_event(action, e)
 	_erased_events.clear()
+	_mirrored.clear()
+	typing = false
+	var chat := get_node_or_null("/root/Chat")
+	if chat and not _quitting:
+		chat.close()
+		chat.clear()
 	for s in range(1, GameState.MAX_PLAYERS + 1):
 		for a in ACTIONS:
 			Input.action_release("p%d_%s" % [s, a])
@@ -643,6 +726,8 @@ func _scene_extra(path: String) -> Dictionary:
 func _process(_d: float) -> void:
 	if not _held_until_seen.is_empty():
 		_release_seen_taps()
+	if is_online():
+		_mirror_keys()
 	if _relay_host:
 		_relay_host.poll()
 	if _relay_client:
@@ -666,10 +751,7 @@ func _physics_process(_d: float) -> void:
 func _send_inputs() -> void:
 	for slot in my_slots():
 		var local: int = my_slots()[slot]
-		var v := PackedByteArray()
-		for a in ACTIONS:
-			var action := "p%d_%s" % [local, a]
-			v.append(roundi(Input.get_action_strength(action) * 255.0) if InputMap.has_action(action) else 0)
+		var v := _keyboard(local)
 		if _last_input.get(slot) != v:
 			_last_input[slot] = v
 			_remote_input.rpc_id(1, slot, v)
@@ -686,6 +768,11 @@ func _remote_input(slot: int, v: PackedByteArray) -> void:
 			owned = true
 	if not owned:
 		return
+	_apply_input(slot, v)
+
+
+## Presses a game slot's buttons as `v` says (one strength per ACTIONS entry).
+func _apply_input(slot: int, v: PackedByteArray) -> void:
 	for i in mini(v.size(), ACTIONS.size()):
 		var action := "p%d_%s" % [slot, ACTIONS[i]]
 		var strength := v[i] / 255.0
@@ -907,9 +994,14 @@ func _chat_up(text: String) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func _chat_show(who: String, text: String) -> void:
-	var console := get_tree().root.get_node_or_null("Console")
-	if console:
-		console.toast("%s: %s" % [who, text])
+	chat_received.emit(who, text)
+
+
+## Host: a message from the game itself to everyone (someone joined, left...).
+func _announce(text: String) -> void:
+	if is_host():
+		_chat_show.rpc("", text)
+		_chat_show("", text)
 
 
 ## Host: run a method on the same node on every client (one-off effects).

@@ -101,10 +101,11 @@ func _drop_in(slot: int) -> void:
 func _add_tag(p: Node2D, i: int) -> void:
 	var tag := Label.new()
 	tag.name = "Tag"
-	tag.text = "P%d" % (i + 1)
+	var net := get_tree().root.get_node_or_null("Net")
+	tag.text = net.player_label(i + 1) if net and net.is_online() else "P%d" % (i + 1)  # online: "Zoe", "Zoe 2"
 	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	tag.position = Vector2(-30, -78)
-	tag.size = Vector2(60, 20)
+	tag.position = Vector2(-80, -78)
+	tag.size = Vector2(160, 20)
 	tag.add_theme_font_override("font", UiTheme.FONT_BOLD)
 	tag.add_theme_font_size_override("font_size", 18)
 	tag.add_theme_color_override("font_color", COLORS[i % COLORS.size()])

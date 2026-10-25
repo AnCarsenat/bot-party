@@ -438,8 +438,8 @@ func _on_joined_changed() -> void:
 ## "P3" for a person, "B1", "B2"... for the bots (numbered in slot order).
 ## In a party, its own bots; in the menus, the bots set up for the next party.
 func label(slot: int) -> String:
-	if NetCheck.client(self):
-		return "P%d" % slot  # online games have no bots
+	if get_node("/root/Net").is_online():
+		return get_node("/root/Net").player_label(slot)  # online games have no bots
 	var list: Array
 	if session.has("bots"):
 		list = session.bots.keys().map(func(k): return int(k))

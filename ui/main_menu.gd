@@ -6,7 +6,7 @@ extends Control
 ## "Players" is the lobby: each player presses their own jump key to join.
 
 const TITLE := "Bot Party"
-const VERSION := "v0.29"
+const VERSION := "v0.30"
 const NAV_REPEAT := 0.16  # seconds between moves when a pad stick is held
 const LIST_TOP := 24.0
 const ROW_STEP := 66.0     # row height + separation
@@ -39,6 +39,12 @@ var _hint: Label
 var _nav_cooldown := 0.0
 var _preview: Control  # Settings: live bubble preview (DistantPlayers.Preview)
 const PREVIEW_KEYS := ["distant_players", "bubble_view", "bubble_size"]
+
+
+func _exit_tree() -> void:
+	var chat := get_node_or_null("/root/Chat")
+	if chat:
+		chat.dock(null)  # back to its corner in the levels
 
 
 func _ready() -> void:
@@ -308,10 +314,12 @@ func _show(screen: String, keep_index := false) -> void:
 					var who := str(Net.computers[peer])
 					_items.append({"text": "Kick %s..." % who.left(12), "size": 34,
 						"info": "%s's computer. Jump: send them out of the game, or ban them." % who,
-						"on_accept": func(): _kick_peer = id; _show("kick")})
+						"peer": id, "on_accept": func(): _kick_peer = id; _show("kick")})
+				_items.append({"text": "Chat", "on_accept": func(): get_node("/root/Chat").open(), "info": "Talk to the others (C or / anywhere while online)."})
 				_items.append({"text": "Close game", "on_accept": func(): Net.leave(); _show("online")})
 			else:
-				_items = [{"text": "Leave", "on_accept": func(): Net.leave(); _show("online")}]
+				_items = [{"text": "Chat", "on_accept": func(): get_node("/root/Chat").open(), "info": "Talk to the others (C or / anywhere while online)."},
+					{"text": "Leave", "on_accept": func(): Net.leave(); _show("online")}]
 		"kick":
 			var who := str(Net.computers.get(_kick_peer, "?"))
 			_items = [
@@ -334,7 +342,8 @@ func _show(screen: String, keep_index := false) -> void:
 					"info": "How big a distant player's bubble is on the screen."},
 				{"text": "Screen shake", "key": "screen_shake", "on_left": func(): _toggle("screen_shake"), "on_right": func(): _toggle("screen_shake"), "on_accept": func(): _toggle("screen_shake"),
 					"info": "Explosions (bombs, nukes, black holes) shake the screen."},
-				{"text": "Controls", "on_accept": func(): _show("controls"), "info": "Change the keys of each player."},
+				{"text": "Controls", "on_accept": func(): _show("controls"), "info": "Change the keys of each player." if not Net.is_online() else "Change the keys before going online.",
+					"enabled": not Net.is_online()},
 				{"text": "Mods", "on_accept": func(): _show("mods"), "info": "Items, maps and textures made by players.",
 					"enabled": not Net.is_online()},
 				{"text": "Data folder", "on_accept": func(): _open_folder(OS.get_user_data_dir()),
@@ -384,12 +393,24 @@ func _show(screen: String, keep_index := false) -> void:
 	_rebuild_list()
 	_refresh_info()
 	_refresh_footer()
-	_hint.text = "Jump to join or leave" if lobby else ""
-	_lobby.mouse_filter = Control.MOUSE_FILTER_STOP if screen == "players" else Control.MOUSE_FILTER_IGNORE
+	_hint.text = ("Jump to join or leave" + ("    C: chat" if Net.is_online() else "")) if lobby else ""
+	_lobby.mouse_filter = Control.MOUSE_FILTER_STOP if screen == "players" or screen == "online_lobby" else Control.MOUSE_FILTER_IGNORE
+	# Online lobby: the chat goes under the computers' boxes.
+	var chat := get_node_or_null("/root/Chat")
+	if screen == "online_lobby":
+		_lobby.offset_bottom = 490
+		if chat:
+			chat.dock(Rect2(get_viewport_rect().size.x - 700, 492, 640, 160))
+	else:
+		_lobby.offset_bottom = 580
+		if chat:
+			chat.dock(null)
+	_lobby.clip_contents = screen == "online_lobby"
+	_lobby._scroll_focus = -1
 	if screen == "players" and not Net.is_online():
 		_hint.text = "Jump: join / leave    Arrows: choose a slot    Delete: remove    +: add a bot / how good"
 	if screen == "online_lobby" and Net.is_client():
-		_hint.text = "Jump to join or leave.  Waiting for the host to start."
+		_hint.text = "Jump to join or leave    C: chat    Waiting for the host to start."
 	_cable.snap = true
 
 
@@ -796,7 +817,8 @@ func _process(delta: float) -> void:
 ## Returns the player slot (1-8) whose `suffix` action this event is, or 0.
 func _player_action(event: InputEvent, suffix: String) -> int:
 	for slot in range(1, GameState.MAX_PLAYERS + 1):
-		var a := "p%d_%s" % [slot, suffix]
+		# Online, each computer's own key sets (the game slots' keys are taken).
+		var a := ("k%d_%s" if Net.is_online() else "p%d_%s") % [slot, suffix]
 		if InputMap.has_action(a) and event.is_action_pressed(a, false, true):
 			return slot
 	return 0
@@ -1052,6 +1074,9 @@ class _Cable extends Control:
 class _Lobby extends Control:
 	var menu
 	var selected := 1
+	var _scroll := 0.0       # online: how far the computers' boxes are scrolled
+	var _scroll_to := 0.0
+	var _scroll_focus := -1
 	var _joined_at := {}
 	var _buttons := []  # [Rect2, Callable] of the selected slot's buttons
 
@@ -1074,6 +1099,13 @@ class _Lobby extends Control:
 		return Vector2((i % 4 + 0.5) * cell.x, (i / 4) * cell.y + 110)
 
 	func _gui_input(event: InputEvent) -> void:
+		if Net.is_online() and event is InputEventMouseButton and event.pressed:
+			var row := (size.y - 36 - 12) / 2.0 + 12.0
+			if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_scroll_to = (roundf(_scroll_to / row) + 1.0) * row
+			elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_scroll_to = maxf(0.0, (roundf(_scroll_to / row) - 1.0) * row)
+			return
 		if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
 			return
 		for b in _buttons:
@@ -1160,26 +1192,51 @@ class _Lobby extends Control:
 		var free := GameState.MAX_PLAYERS - Net.roster.size()
 		var full := free <= 0
 		var n := order.size()
-		# One or two columns, whichever shows the places bigger (8 places: 4 x 2,
-		# a place is 160 x 185 at full size).
+		# One or two columns of boxes, the 8 places in 4 x 2 or in a row of 8:
+		# whichever shows the places biggest (a place is 160 x 185 at full size).
 		var gap := 12.0
-		var area := Vector2(size.x, size.y - 36)
+		var area := Vector2(size.x - 14, size.y - 36)
 		var cols := 1
+		var per_row := 4
 		var zoom := 0.0
-		for c in [1, 2]:
+		for c in [2, 1]:
 			if c > n:
 				continue
-			var rws: int = ceili(n / float(c))
+			# At most 2 rows on screen; more computers than that: it scrolls.
+			var rws: int = mini(ceili(n / float(c)), 2)
 			var w: float = (area.x - gap * (c - 1)) / c
 			var h: float = (area.y - gap * (rws - 1)) / rws
-			var z: float = clampf(minf((w - 16) / 640.0, (h - 40) / 370.0), 0.15, 0.6)
-			if z > zoom + 0.01:
-				zoom = z
-				cols = c
-		var box := Vector2((area.x - gap * (cols - 1)) / cols, 40 + 370.0 * zoom)
+			for pr in [4, 8]:
+				var z: float = clampf(minf((w - 16) / (pr * 160.0), (h - 40) / ((8 / pr) * 185.0)), 0.15, 0.6)
+				if z > zoom + 0.01:
+					zoom = z
+					cols = c
+					per_row = pr
+		var box := Vector2(minf((area.x - gap * (cols - 1)) / cols, 16 + per_row * 160.0 * zoom), 40 + (8 / per_row) * 185.0 * zoom)
+		var all_rows := ceili(n / float(cols))
+		if all_rows > 2:
+			box.y = (area.y - gap) / 2.0  # two rows a screen, scrolled a row at a time
+		# Scrolling (like the settings list): to the box of the computer chosen
+		# in the menu (host: Kick...), else to ours; the mouse wheel too.
+		var content := ceili(n / float(cols)) * (box.y + gap) - gap
+		var focus: int = menu._items[menu._index].get("peer", Net.my_id()) if menu and not menu._items.is_empty() else Net.my_id()
+		var fk := maxi(0, order.find(focus))
+		if focus != _scroll_focus:
+			_scroll_focus = focus
+			var top := (fk / cols) * (box.y + gap)
+			if top < _scroll_to or top + box.y > _scroll_to + area.y:
+				_scroll_to = top + box.y - area.y if top > _scroll_to else top
+		_scroll_to = clampf(_scroll_to, 0.0, maxf(0.0, content - area.y))
+		_scroll = lerpf(_scroll, _scroll_to, 0.25)
+		if content > area.y:
+			# A little bar on the right: where we are in the list.
+			var bar_h := area.y * area.y / content
+			draw_rect(Rect2(area.x + 6, _scroll / content * area.y, 6, bar_h), UiTheme.MUTED)
 		for k in n:
 			var peer: int = order[k]
-			var r := Rect2(Vector2((k % cols) * (box.x + gap), (k / cols) * (box.y + gap)), box)
+			var r := Rect2(Vector2((k % cols) * (box.x + gap), (k / cols) * (box.y + gap) - _scroll), box)
+			if r.position.y < -2.0 or r.end.y > area.y + 2.0:
+				continue  # only whole boxes (it's scrolling)
 			var mine := peer == Net.my_id()
 			draw_rect(r, UiTheme.LIME if mine else Color.WHITE)
 			draw_rect(r, UiTheme.ACCENT if mine else UiTheme.INK, false, 4.0 if mine else 3.0)
@@ -1199,10 +1256,10 @@ class _Lobby extends Control:
 					by_local[int(e.local)] = int(e.slot)
 			for i in GameState.MAX_PLAYERS:
 				var local := i + 1
-				var c := r.position + Vector2(8 + ((i % 4) + 0.5) * 160.0 * zoom, 36 + (95.0 + (i / 4) * 185.0) * zoom)
+				var c := r.position + Vector2(8 + ((i % per_row) + 0.5) * 160.0 * zoom, 36 + (95.0 + (i / per_row) * 185.0) * zoom)
 				draw_set_transform(c, 0.0, Vector2(zoom, zoom))
 				if by_local.has(local):
-					_draw_cell(by_local[local], true, "P%d" % by_local[local], "")
+					_draw_cell(by_local[local], true, "P%d" % local, "")  # its own number on its computer
 				elif full:
 					_draw_cell(0, false, "", "", true)
 				else:

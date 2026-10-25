@@ -75,6 +75,9 @@ static func button(text: String, on_pressed: Callable) -> Button:
 static func slot_label(slot: int) -> String:
 	var tree := Engine.get_main_loop() as SceneTree
 	var party = tree.root.get_node_or_null("Party")
+	var net = tree.root.get_node_or_null("Net")
+	if net and net.is_online():
+		return net.player_label(slot)
 	var scene := tree.current_scene
 	if party and scene and scene.has_node("PartyController"):
 		return party.label(slot)
@@ -102,6 +105,12 @@ static func player_chip(slot: int, faded := false) -> PanelContainer:
 	return p
 
 
+## Action prefix of key set n: online the keys live in k1_..k8_ (net.gd).
+static func _keys_of(n: int) -> String:
+	var online := InputMap.has_action("k%d_action_1" % n) and InputMap.action_get_events("p%d_action_1" % n).is_empty()
+	return ("k%d_" if online else "p%d_") % n
+
+
 ## The key a player jumps with, as text ("Space", "N", "Pad 1 A").
 static func jump_key_text(n: int) -> String:
 	return action_key_text(n, 1)
@@ -109,7 +118,7 @@ static func jump_key_text(n: int) -> String:
 
 ## The key for a player's action 1, 2 or 3 ("Space", "E", "Pad 1 X").
 static func action_key_text(n: int, action: int) -> String:
-	var name := "p%d_action_%d" % [n, action]
+	var name: String = _keys_of(n) + "action_%d" % action
 	if not InputMap.has_action(name):
 		return "-"
 	for ev in InputMap.action_get_events(name):
@@ -123,7 +132,7 @@ static func action_key_text(n: int, action: int) -> String:
 static func controls_text(n: int) -> String:
 	var parts := []
 	for action in ["move_left", "move_right", "action_1"]:
-		var name := "p%d_%s" % [n, action]
+		var name: String = _keys_of(n) + action
 		if not InputMap.has_action(name):
 			continue
 		for ev in InputMap.action_get_events(name):
