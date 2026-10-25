@@ -6,7 +6,7 @@ extends Control
 ## "Players" is the lobby: each player presses their own jump key to join.
 
 const TITLE := "Bot Party"
-const VERSION := "v0.28"
+const VERSION := "v0.29"
 const NAV_REPEAT := 0.16  # seconds between moves when a pad stick is held
 const LIST_TOP := 24.0
 const ROW_STEP := 66.0     # row height + separation
@@ -54,7 +54,9 @@ func _ready() -> void:
 			_hint.text = reason)
 	Net.roster_changed.connect(func():
 		if _screen == "online_lobby":
-			_show("online_lobby", true))
+			_show("online_lobby", true)
+		elif _screen == "kick" and not Net.computers.has(_kick_peer):
+			_show("online_lobby" if Net.is_online() else "online"))
 	Net.servers_listed.connect(_on_servers)
 	# Coming back from a level while online: straight to the online lobby.
 	_show("online_lobby" if Net.is_online() else "main")
@@ -275,24 +277,21 @@ func _show(screen: String, keep_index := false) -> void:
 		"servers":
 			if _servers.is_empty():
 				_items.append({"text": "Searching..." if _listing else "No games found", "enabled": false})
-			# Each hosted game is a room of its own: the ones waiting for players
-			# first, then the ones already playing.
-			for group in [["Waiting for players", func(m): return m == "lobby" or m == ""],
-					["Playing", func(m): return m != "lobby" and m != ""]]:
-				var rooms := _servers.filter(func(r): return group[1].call(str(r.get("mode", ""))))
-				if rooms.is_empty():
-					continue
-				_items.append({"text": "%s (%d)" % [group[0], rooms.size()], "enabled": false, "size": 26})
-				for e in rooms:
-					var entry: Dictionary = e
-					var full: bool = int(entry.players) >= int(entry.max)
-					var mode := str(entry.get("mode", ""))
-					var doing: String = {"party": "Playing party mode", "campaign": "Playing the campaign"}.get(mode, "In the lobby")
-					_items.append({"text": "%s  %d/%d" % [str(entry.name).left(18), int(entry.players), int(entry.max)], "size": 34,
-						"enabled": not full,
-						"info": "%s\n%d of %d players%s%s" % [doing, int(entry.players), int(entry.max), "  (full)" if full else "",
-							"\n(relay available)" if entry.get("relay", false) else ""],
-						"on_accept": func(): _start(func(): _hint.text = "Connecting..."; Net.join_listed(entry, entry.you))})
+			# Each hosted game is a room of its own, drawn as its own card with its
+			# own players: the ones waiting for players first, then the ones playing.
+			var rooms := _servers.duplicate()
+			rooms.sort_custom(func(a, b): return _room_waiting(a) and not _room_waiting(b))
+			for e in rooms:
+				var entry: Dictionary = e
+				var full: bool = int(entry.players) >= int(entry.max)
+				var mode := str(entry.get("mode", ""))
+				var doing: String = {"party": "Playing party mode", "campaign": "Playing the campaign"}.get(mode, "Waiting for players")
+				var names: Array = entry.get("names", [])
+				_items.append({"text": str(entry.name).left(18), "room": entry, "enabled": not full,
+					"info": "%s\n%d of %d players%s%s%s" % [doing, int(entry.players), int(entry.max), "  (full)" if full else "",
+						("\nIn this room: " + ", ".join(names)) if not names.is_empty() else "",
+						"\n(relay available)" if entry.get("relay", false) else ""],
+					"on_accept": func(): _start(func(): _hint.text = "Connecting..."; Net.join_listed(entry, entry.you))})
 			_items.append({"text": "Refresh", "on_accept": func(): _listing = true; _servers.clear(); _show("servers", true); Net.list_servers()})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"online_lobby":
@@ -300,10 +299,28 @@ func _show(screen: String, keep_index := false) -> void:
 				_items = [
 					{"text": "Campaign", "on_accept": func(): _show("campaign")},
 					{"text": "Party", "on_accept": func(): Party.new_game()},
-					{"text": "Close game", "on_accept": func(): Net.leave(); _show("online")},
 				]
+				# The others' computers: kick or ban them.
+				for peer in Net.computers:
+					if int(peer) == 1:
+						continue
+					var id := int(peer)
+					var who := str(Net.computers[peer])
+					_items.append({"text": "Kick %s..." % who.left(12), "size": 34,
+						"info": "%s's computer. Jump: send them out of the game, or ban them." % who,
+						"on_accept": func(): _kick_peer = id; _show("kick")})
+				_items.append({"text": "Close game", "on_accept": func(): Net.leave(); _show("online")})
 			else:
 				_items = [{"text": "Leave", "on_accept": func(): Net.leave(); _show("online")}]
+		"kick":
+			var who := str(Net.computers.get(_kick_peer, "?"))
+			_items = [
+				{"text": "Kick", "on_accept": func(): Net.kick(_kick_peer); _show("online_lobby"),
+					"info": "%s and their players leave the game. They can join again." % who},
+				{"text": "Ban", "on_accept": func(): Net.kick(_kick_peer, true); _show("online_lobby"),
+					"info": "%s and their players leave the game and can't come back while you host (same name or address)." % who},
+				{"text": "Back", "on_accept": func(): _show("online_lobby")},
+			]
 		"settings":
 			_items = [
 				{"text": "Music", "key": "music_volume", "on_left": func(): _bump("music_volume", -0.1), "on_right": func(): _bump("music_volume", 0.1), "on_accept": func(): _bump("music_volume", 0.1, true), },
@@ -352,7 +369,8 @@ func _show(screen: String, keep_index := false) -> void:
 				"info": "Put mod packs (.pck) or mod folders here:\n%s\nThen come back to this screen." % ProjectSettings.globalize_path(Mods.DIR)})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 	_heading.text = {"main": "", "campaign": _campaign_heading(), "party": "Party", "party_items": "Party items", "party_rules": "Party rules", "players": "Players",
-		"settings": "Settings", "controls": "Controls", "mods": "Mods", "online": "Online", "servers": "Server list", "online_lobby": _online_heading()}[screen]
+		"settings": "Settings", "controls": "Controls", "mods": "Mods", "online": "Online", "servers": "Server list", "online_lobby": _online_heading(),
+		"kick": "Kick or ban %s" % str(Net.computers.get(_kick_peer, "?"))}[screen]
 	if not keep_index:
 		_index = 0
 	_index = clampi(_index, 0, _items.size() - 1)
@@ -494,6 +512,7 @@ func _game_folder() -> String:
 # --- Online -----------------------------------------------------------------------
 
 var _servers: Array = []
+var _kick_peer := 0  # host: whose computer the Kick / ban screen is about
 var _listing := false
 var _last_address := ""
 var _editor: PanelContainer
@@ -523,6 +542,10 @@ func _on_servers(list: Array) -> void:
 		_show("servers", true)
 		if list.is_empty():
 			_hint.text = "Server list unreachable or empty" if Net.lobby_url != "" else "Set the server list address first"
+
+
+static func _room_waiting(entry: Dictionary) -> bool:
+	return str(entry.get("mode", "")) in ["", "lobby"]
 
 
 func _online_heading() -> String:
@@ -722,6 +745,9 @@ func _back() -> void:
 		return
 	if _screen == "online_lobby":
 		return  # leave with the Leave / Close option
+	if _screen == "kick":
+		_show("online_lobby")
+		return
 	if _screen == "servers":
 		_show("online")
 		_select(2)
@@ -889,6 +915,8 @@ class _Row extends Control:
 			return Vector2.ZERO
 		var item: Dictionary = menu._items[index]
 		var w := UiTheme.FONT_BOLD.get_string_size(item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, item.get("size", TEXT_SIZE)).x
+		if item.has("room"):
+			return Vector2(4 + 8 + 560 + 4, 31)  # the card's right edge
 		if item.has("value"):
 			return Vector2(VALUE_X + 225.0, 34)
 		if item.has("key"):
@@ -904,6 +932,9 @@ class _Row extends Control:
 		if index >= menu._items.size():
 			return  # a row of the screen we just left, about to go
 		var item: Dictionary = menu._items[index]
+		if item.has("room"):
+			_draw_room(item)
+			return
 		if item.get("heading", false):
 			# A section title (Party > Items): no button, a line under it.
 			draw_string(UiTheme.FONT_BOLD, Vector2(4, 44), item.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 30, UiTheme.ACCENT)
@@ -947,6 +978,32 @@ class _Row extends Control:
 				draw_rect(r, UiTheme.INK, false, 2.0)
 			draw_string(UiTheme.FONT_MEDIUM, Vector2(VALUE_X + 150, 46), val.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 30,
 				UiTheme.INK if bar > 0.0 else Color("9a97a6"))
+
+
+	## A hosted game in the server list: a card of its own (name, who's in it,
+	## waiting or playing, how full).
+	func _draw_room(item: Dictionary) -> void:
+		var room: Dictionary = item.room
+		var selected: bool = index == menu._index
+		var enabled: bool = item.get("enabled", true)
+		var waiting: bool = menu._room_waiting(room)
+		var card := Rect2(Vector2(4 + (8.0 if selected else 0.0), 2), Vector2(560, 58))
+		draw_rect(card, UiTheme.LIME if selected else Color.WHITE)
+		draw_rect(card, UiTheme.ACCENT if selected else UiTheme.INK, false, 4.0 if selected else 3.0)
+		# Waiting / playing tag on the left edge.
+		var tag := Rect2(card.position + Vector2(8, 10), Vector2(96, 38))
+		draw_rect(tag, UiTheme.LIVE if waiting else UiTheme.CRATE)
+		draw_rect(tag, UiTheme.INK, false, 2.0)
+		draw_string(UiTheme.FONT_MEDIUM, tag.position + Vector2(0, 28), "Open" if waiting else "Playing",
+			HORIZONTAL_ALIGNMENT_CENTER, tag.size.x, 24, UiTheme.INK)
+		var color: Color = UiTheme.INK if enabled else Color("9a97a6")
+		var x := tag.end.x + 14.0
+		draw_string(UiTheme.FONT_BOLD, Vector2(x, 30), item.text, HORIZONTAL_ALIGNMENT_LEFT, 300, 30, color)
+		var names: Array = room.get("names", [])
+		var who := ", ".join(names) if not names.is_empty() else "%d player%s" % [int(room.players), "" if int(room.players) == 1 else "s"]
+		draw_string(UiTheme.FONT_MEDIUM, Vector2(x, 52), who, HORIZONTAL_ALIGNMENT_LEFT, 300, 20, UiTheme.MUTED)
+		draw_string(UiTheme.FONT_BOLD, Vector2(card.end.x - 90, 42), "%d/%d" % [int(room.players), int(room.max)],
+			HORIZONTAL_ALIGNMENT_RIGHT, 78, 30, color)
 
 
 ## The live cable from the machine to the selected option.
@@ -1039,6 +1096,9 @@ class _Lobby extends Control:
 	func _draw() -> void:
 		_buttons.clear()
 		var offline := not Net.is_online()
+		if not offline:
+			_draw_online()
+			return
 		for i in GameState.MAX_PLAYERS:
 			var slot := i + 1
 			var bot: bool = offline and Party.bot_list.has(slot)
@@ -1082,6 +1142,94 @@ class _Lobby extends Control:
 					_button(row, "Remove", func(): menu.lobby_remove(slot))
 				else:
 					_button(row, "Add bot", func(): menu.lobby_bot(slot))
+
+	## Online: one box per computer (the host first; this computer's marked
+	## "you"), each with its own 8 places like the Players screen, smaller: its
+	## players on their buttons, the free places with the key that joins there.
+	## When the game is full, every free place is greyed out.
+	func _draw_online() -> void:
+		var order: Array = [1]
+		for peer in Net.computers:
+			if not int(peer) in order:
+				order.append(int(peer))
+		for r in Net.roster:
+			if not int(r.peer) in order:
+				order.append(int(r.peer))
+		if not Net.my_id() in order:
+			order.append(Net.my_id())
+		var free := GameState.MAX_PLAYERS - Net.roster.size()
+		var full := free <= 0
+		var n := order.size()
+		# One or two columns, whichever shows the places bigger (8 places: 4 x 2,
+		# a place is 160 x 185 at full size).
+		var gap := 12.0
+		var area := Vector2(size.x, size.y - 36)
+		var cols := 1
+		var zoom := 0.0
+		for c in [1, 2]:
+			if c > n:
+				continue
+			var rws: int = ceili(n / float(c))
+			var w: float = (area.x - gap * (c - 1)) / c
+			var h: float = (area.y - gap * (rws - 1)) / rws
+			var z: float = clampf(minf((w - 16) / 640.0, (h - 40) / 370.0), 0.15, 0.6)
+			if z > zoom + 0.01:
+				zoom = z
+				cols = c
+		var box := Vector2((area.x - gap * (cols - 1)) / cols, 40 + 370.0 * zoom)
+		for k in n:
+			var peer: int = order[k]
+			var r := Rect2(Vector2((k % cols) * (box.x + gap), (k / cols) * (box.y + gap)), box)
+			var mine := peer == Net.my_id()
+			draw_rect(r, UiTheme.LIME if mine else Color.WHITE)
+			draw_rect(r, UiTheme.ACCENT if mine else UiTheme.INK, false, 4.0 if mine else 3.0)
+			var title := str(Net.computers.get(peer, Net.player_name if mine else Net._name_of_peer(peer)))
+			var tags := []
+			if peer == 1:
+				tags.append("host")
+			if mine:
+				tags.append("you")
+			if not tags.is_empty():
+				title += "  (" + ", ".join(tags) + ")"
+			draw_string(UiTheme.FONT_BOLD, r.position + Vector2(12, 28), title, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 24, 24, UiTheme.INK)
+			# Its 8 places: its key sets 1-8.
+			var by_local := {}
+			for e in Net.roster:
+				if int(e.peer) == peer:
+					by_local[int(e.local)] = int(e.slot)
+			for i in GameState.MAX_PLAYERS:
+				var local := i + 1
+				var c := r.position + Vector2(8 + ((i % 4) + 0.5) * 160.0 * zoom, 36 + (95.0 + (i / 4) * 185.0) * zoom)
+				draw_set_transform(c, 0.0, Vector2(zoom, zoom))
+				if by_local.has(local):
+					_draw_cell(by_local[local], true, "P%d" % by_local[local], "")
+				elif full:
+					_draw_cell(0, false, "", "", true)
+				else:
+					_draw_cell(0, false, "", UiTheme.jump_key_text(local) if mine else "")
+				draw_set_transform(Vector2.ZERO)
+		draw_string(UiTheme.FONT_MEDIUM, Vector2(0, size.y - 6), "Full" if full else "%d free place%s" % [free, "" if free == 1 else "s"],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 24, UiTheme.RED if full else UiTheme.MUTED)
+
+	## One place drawn round (0, 0) like on the Players screen: a robot standing
+	## on its button (or an empty button), a label and a line under it.
+	func _draw_cell(slot: int, joined: bool, label: String, sub: String, greyed := false) -> void:
+		var color: Color = PlayerSpawner.COLORS[(slot - 1) % 8] if slot > 0 else Color("c9c6d2")
+		var sink := 6.0 if joined else 0.0
+		var off := Color("8f8c99") if greyed else Color("c9c6d2")
+		draw_texture_rect(TEX_CAP, Rect2(Vector2(-48, -60 + sink), Vector2(96, 96)), false, color if joined else off)
+		draw_texture_rect(TEX_BASE, Rect2(Vector2(-48, -60), Vector2(96, 96)), false, Color(0.7, 0.7, 0.75) if greyed else Color.WHITE)
+		if joined:
+			var t := clampf((Time.get_ticks_msec() - _joined_at.get(slot, 0)) / 250.0, 0.0, 1.0)
+			var drop := (1.0 - t) * (1.0 - t) * -70.0
+			var r := Rect2(Vector2(-40, -86 + sink + drop), Vector2(80, 80))
+			var frame := 0 if t >= 1.0 else 7
+			draw_texture_rect_region(TEX_PLAYER_BODY, r, Rect2(frame * 32, 0, 32, 32), color)
+			draw_texture_rect_region(TEX_PLAYER_FACE, r, Rect2(frame * 32, 0, 32, 32))
+		draw_string(UiTheme.FONT_BOLD, Vector2(-60, 62), label, HORIZONTAL_ALIGNMENT_CENTER, 120, 30,
+			UiTheme.INK if joined else Color("8a8796"))
+		draw_string(UiTheme.FONT_REGULAR, Vector2(-80, 86), sub, HORIZONTAL_ALIGNMENT_CENTER, 160, 24,
+			UiTheme.ACCENT if joined else UiTheme.MUTED)
 
 	## B1, B2... for the bots set up for the next party.
 	func _bot_label(slot: int) -> String:

@@ -13,13 +13,14 @@ var id := ""
 var token := ""
 var _players := 0
 var _mode := ""
+var _names: Array = []
 var _beat: Timer
 
 
 func _ready() -> void:
 	_beat = Timer.new()
 	_beat.wait_time = HEARTBEAT
-	_beat.timeout.connect(func(): heartbeat(_players, _mode))
+	_beat.timeout.connect(func(): heartbeat(_players, _mode, _names))
 	add_child(_beat)
 
 
@@ -48,6 +49,7 @@ func register(url: String, info: Dictionary, done: Callable) -> void:
 	base = normalize(url)
 	_players = int(info.get("players", 1))
 	_mode = info.get("mode", "")
+	_names = info.get("names", [])
 	_request("POST", "/api/host", info, func(ok: bool, data: Dictionary):
 		if ok and data.has("id"):
 			id = data.id
@@ -57,11 +59,13 @@ func register(url: String, info: Dictionary, done: Callable) -> void:
 	)
 
 
-func heartbeat(players: int, mode: String) -> void:
+## `names`: who is in the game (shown in the server list, so each room shows its own players).
+func heartbeat(players: int, mode: String, names := []) -> void:
 	_players = players
 	_mode = mode
+	_names = names
 	if registered():
-		_request("POST", "/api/heartbeat", {"id": id, "token": token, "players": players, "mode": mode}, func(_ok, _d): pass)
+		_request("POST", "/api/heartbeat", {"id": id, "token": token, "players": players, "mode": mode, "names": names}, func(_ok, _d): pass)
 
 
 func close() -> void:

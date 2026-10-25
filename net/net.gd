@@ -34,6 +34,8 @@ var mode := Mode.OFFLINE
 ## Everyone in the game: [{slot, peer, local, name}]. slot = global player number
 ## (P1..P8), peer = network id (1 = host), local = that computer's own key set.
 var roster: Array = []
+var computers: Dictionary = {}  # peer id -> name: every computer in the game (players or not)
+var banned: Array = []          # host: [{name, ip}] who can't join again while it hosts
 ## Who you are, and where the server list lives (saved in user://online.cfg).
 var player_name := "Player"
 ## UDP port to host on (Online > Port, or --port on the command line).
@@ -148,6 +150,8 @@ func host(public: bool) -> Error:
 	mode = Mode.HOST
 	_offline_joined = GameState.joined.duplicate()
 	roster.clear()
+	computers = {1: player_name.left(16)}
+	banned.clear()
 	for s in GameState.joined:
 		roster.append({"slot": s, "peer": 1, "local": s, "name": player_name})
 	server_name = "%s's game" % player_name
@@ -164,7 +168,7 @@ func _register(port: int) -> void:
 		status.emit("Hosting (not listed: no server list address set)")
 		return
 	var info := {"name": server_name, "port": port, "max": GameState.MAX_PLAYERS,
-		"players": roster.size(), "mode": _mode_text(), "lan_ip": _lan_ip()}
+		"players": roster.size(), "mode": _mode_text(), "lan_ip": _lan_ip(), "names": room_names()}
 	_lobby.register(lobby_url, info, func(ok: bool, data: Dictionary):
 		if not ok or not is_host():
 			status.emit("Server list unreachable: only direct connections")
@@ -199,6 +203,7 @@ func _on_peer_connected(id: int) -> void:
 func _on_peer_disconnected(id: int) -> void:
 	if not is_host():
 		return
+	computers.erase(id)
 	var gone := []
 	for r in roster.duplicate():
 		if int(r.peer) == id:
@@ -219,10 +224,15 @@ func _hello(who: String, local_slots: Array, their_mods := []) -> void:
 	if not is_host():
 		return
 	var id := multiplayer.get_remote_sender_id()
+	if is_banned(who, _address_of(id)):
+		_refused.rpc_id(id, "You can't join this game: the host banned you")
+		get_tree().create_timer(0.5).timeout.connect(func(): if _peer: _peer.disconnect_peer(id))
+		return
 	var missing := _missing_mods(their_mods)
 	if missing != "":
 		_refused.rpc_id(id, "You need these mods to join: " + missing)
 		return
+	computers[id] = who.left(16)
 	for l in local_slots:
 		_add_player(id, int(l), who)
 	_roster_updated()
@@ -328,8 +338,9 @@ func _roster_updated() -> void:
 	_apply_joined()
 	if is_host():
 		_set_roster.rpc(roster)
+		_set_computers.rpc(computers)
 		if _lobby.registered():
-			_lobby.heartbeat(roster.size(), _mode_text())
+			_lobby.heartbeat(roster.size(), _mode_text(), room_names())
 	roster_changed.emit()
 
 
@@ -453,6 +464,52 @@ func _on_server_gone() -> void:
 		GameState.go_to_menu("The host left")
 
 
+## Host -> clients: every computer in the game (even without a player yet).
+@rpc("authority", "call_remote", "reliable")
+func _set_computers(c: Dictionary) -> void:
+	computers = c
+	roster_changed.emit()
+
+
+# --- Kick and ban (host) --------------------------------------------------------
+
+## The computers' addresses (as the host sees them): through the relay, every
+## one looks like 127.0.0.1, so a ban there goes by name only.
+func _address_of(id: int) -> String:
+	var p := _peer.get_peer(id) if _peer else null
+	var ip := p.get_remote_address() if p else ""
+	return "" if ip.begins_with("127.") or ip == "::1" else ip
+
+
+func is_banned(who: String, ip: String) -> bool:
+	for b in banned:
+		if b.name == who.left(16) or (ip != "" and b.ip == ip):
+			return true
+	return false
+
+
+## Sends a computer (and its players) out of the game; `ban`: it can't come
+## back while you host (same name or address).
+func kick(id: int, ban := false) -> void:
+	if not is_host() or id == 1 or not computers.has(id):
+		return
+	if ban:
+		banned.append({"name": str(computers[id]), "ip": _address_of(id)})
+	_kicked.rpc_id(id, "The host banned you" if ban else "The host sent you out of the game")
+	get_tree().create_timer(0.3).timeout.connect(func():
+		if _peer and id in multiplayer.get_peers():
+			_peer.disconnect_peer(id))
+
+
+@rpc("authority", "call_remote", "reliable")
+func _kicked(reason: String) -> void:
+	var in_level := get_tree().current_scene != null and not get_tree().current_scene.scene_file_path.ends_with("main_menu.tscn")
+	leave()
+	failed.emit(reason)
+	if in_level:
+		GameState.go_to_menu(reason)
+
+
 @rpc("authority", "call_remote", "reliable")
 func _set_roster(r: Array) -> void:
 	roster = r
@@ -503,6 +560,7 @@ func leave() -> void:
 	var was_online := mode != Mode.OFFLINE
 	mode = Mode.OFFLINE
 	roster.clear()
+	computers.clear()
 	_reset_sync()
 	_last_input.clear()
 	if was_online and not _offline_joined.is_empty():
@@ -555,7 +613,7 @@ func allow_scene_change(path: String, message: String, message_time: float) -> b
 		_reset_sync()
 		_load_scene.rpc(path, message, message_time, _scene_token, _scene_extra(path))
 		if _lobby.registered():
-			_lobby.heartbeat.call_deferred(roster.size(), _mode_text())
+			_lobby.heartbeat.call_deferred(roster.size(), _mode_text(), room_names())
 		return true
 	if is_client():
 		return _applying
@@ -895,7 +953,19 @@ func list_servers() -> void:
 
 func lobby_heartbeat() -> void:
 	if is_host() and _lobby.registered():
-		_lobby.heartbeat(roster.size(), _mode_text())
+		_lobby.heartbeat(roster.size(), _mode_text(), room_names())
+
+
+## Who is in this game, one name per computer ("Alice x2" for two players on one keyboard).
+func room_names() -> Array:
+	var count := {}
+	var order := []
+	for r in roster:
+		var n := str(r.get("name", "?")).left(16)
+		if not count.has(n):
+			order.append(n)
+		count[n] = count.get(n, 0) + 1
+	return order.map(func(n): return n if count[n] == 1 else "%s x%d" % [n, count[n]])
 
 
 # --- Config -----------------------------------------------------------------------------

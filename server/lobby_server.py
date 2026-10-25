@@ -32,6 +32,13 @@ MAX_CLIENTS_PER_SERVER = 16
 log = logging.getLogger("lobby")
 
 
+def clean_names(names):
+    """Who is in a game (shown in the list): up to 8 short names."""
+    if not isinstance(names, list):
+        return []
+    return [str(n)[:20] for n in names[:8]]
+
+
 class Server:
     def __init__(self, sid, token, ip, info):
         self.id, self.token, self.ip = sid, token, ip
@@ -55,7 +62,8 @@ class Lobby:
             return {"you": ip, "relay_port": ARGS.relay_port, "servers": [
                 {"id": s.id, "name": s.info["name"], "ip": s.ip, "port": s.info["port"],
                  "lan_ip": s.info.get("lan_ip", ""), "players": s.info["players"], "max": s.info["max"],
-                 "mode": s.info.get("mode", ""), "relay": s.relay_addr is not None}
+                 "mode": s.info.get("mode", ""), "names": s.info.get("names", []),
+                 "relay": s.relay_addr is not None}
                 for s in self.servers.values()]}
         if method != "POST":
             return None
@@ -69,6 +77,7 @@ class Lobby:
                 "players": max(0, min(8, int(body.get("players", 1)))),
                 "mode": str(body.get("mode", ""))[:12],
                 "lan_ip": str(body.get("lan_ip", ""))[:40],
+                "names": clean_names(body.get("names")),
             }
             sid = secrets.token_hex(4)          # 8 characters
             token = secrets.token_hex(8)        # 16 characters
@@ -82,6 +91,8 @@ class Lobby:
             s.seen = time.monotonic()
             s.info["players"] = max(0, min(8, int(body.get("players", s.info["players"]))))
             s.info["mode"] = str(body.get("mode", s.info["mode"]))[:12]
+            if "names" in body:
+                s.info["names"] = clean_names(body.get("names"))
             return {"ok": True}
         if path == "/api/close":
             self.remove(s.id)
