@@ -546,6 +546,45 @@ func _set_computers(c: Dictionary) -> void:
 	roster_changed.emit()
 
 
+# --- Names ---------------------------------------------------------------------
+
+## A new name for this computer (saved); online, everyone sees it right away.
+func rename(new_name: String) -> String:
+	new_name = new_name.strip_edges().left(16)
+	if new_name == "" or new_name == player_name:
+		return player_name
+	player_name = new_name
+	save_config()
+	if is_host():
+		_set_name(1, new_name)
+	elif is_client():
+		_rename_up.rpc_id(1, new_name)
+	return player_name
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rename_up(new_name: String) -> void:
+	if is_host():
+		_set_name(multiplayer.get_remote_sender_id(), new_name.strip_edges().left(16))
+
+
+## Host: computer `id` is now called `new_name` (its players too).
+func _set_name(id: int, new_name: String) -> void:
+	if new_name == "" or not computers.has(id):
+		return
+	var old := str(computers[id])
+	computers[id] = new_name
+	for r in roster:
+		if int(r.peer) == id:
+			r.name = new_name
+	if old != new_name:
+		_announce("%s is now %s" % [old, new_name])
+	if id == 1:
+		server_name = "%s's game" % new_name
+		_lobby.game_name = server_name
+	_roster_updated()
+
+
 # --- Kick and ban (host) --------------------------------------------------------
 
 ## The computers' addresses (as the host sees them): through the relay, every

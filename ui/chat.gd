@@ -1,44 +1,49 @@
 extends CanvasLayer
-## Online chat. C (or /) opens a line to type in, Enter sends, Esc closes.
-## Messages show at the bottom left for a while (all the recent ones while
-## typing). While typing, this computer's players don't move (net.gd).
+## Chat, and the console's commands: type !help.
+## C or / opens it (online), the key left of 1 or F1 opens it with a "!" ready
+## (also offline). Enter sends, Esc closes, Up / Down: what you typed before,
+## Tab: finish a command. Messages show at the bottom left for a while: small
+## and see-through in the levels, under the boxes in the online lobby. In an
+## online party a faint bar invites you to chat. While typing, this computer's
+## players stand still (net.gd); offline, the game pauses.
 
 const SHOW_FOR := 8.0     # seconds a message stays when the chat is closed
-const KEEP := 12          # messages shown while typing
+const KEEP := 50
 const OPEN_KEYS := [KEY_C, KEY_SLASH]
 
-var _lines: Array = []    # [who ("" = the game), text, time]
-var _panel: PanelContainer
+var _lines: Array = []    # [who ("" = the game, "*" = only here, bbcode), text, time]
+var _panel: Control
+var _scroll: ScrollContainer
 var _list: VBoxContainer
 var _input: LineEdit
+var _bar: Label           # "C  Chat..." when closed (online party)
 var _shown := ""
+var _docked := false
+var _dock_rect := Rect2()
+var _history: Array[String] = []
+var _history_pos := 0
+var _paused_by_us := false
 
 
 func _ready() -> void:
 	layer = 95
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_panel = PanelContainer.new()
-	_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_panel.offset_left = 16
-	_panel.offset_right = 576
-	_panel.offset_top = -330
-	_panel.offset_bottom = -64
+	_panel = Control.new()
 	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(UiTheme.MARBLE, 0.0)
-	_panel.add_theme_stylebox_override("panel", style)
 	add_child(_panel)
-	var col := VBoxContainer.new()
-	col.alignment = BoxContainer.ALIGNMENT_END
-	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_panel.add_child(col)
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	_scroll.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_panel.add_child(_scroll)
 	_list = VBoxContainer.new()
 	_list.alignment = BoxContainer.ALIGNMENT_END
+	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_list.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	col.add_child(_list)
+	_scroll.add_child(_list)
 	_input = LineEdit.new()
-	_input.placeholder_text = "Say something  (Enter: send, Esc: close)"
+	_input.placeholder_text = "Say something, or !help  (Enter: send, Esc: close)"
 	_input.max_length = 200
 	_input.add_theme_font_override("font", UiTheme.FONT_MEDIUM)
 	_input.add_theme_font_size_override("font_size", 22)
@@ -53,67 +58,101 @@ func _ready() -> void:
 	_input.add_theme_color_override("font_placeholder_color", UiTheme.MUTED)
 	_input.add_theme_color_override("caret_color", UiTheme.INK)
 	_input.text_submitted.connect(_send)
-	_input.gui_input.connect(func(e):
-		if e is InputEventKey and e.pressed and e.physical_keycode == KEY_ESCAPE:
-			close()
-			_input.accept_event())
+	_input.gui_input.connect(_on_key)
 	_input.focus_exited.connect(func(): if _input.visible: close.call_deferred())
 	_input.hide()
-	col.add_child(_input)
-	var net := get_node("/root/Net")
-	net.chat_received.connect(add)
+	_panel.add_child(_input)
+	_bar = Label.new()
+	_bar.text = "C  Chat..."
+	_bar.add_theme_font_override("font", UiTheme.FONT_MEDIUM)
+	_bar.add_theme_font_size_override("font_size", 18)
+	_bar.add_theme_color_override("font_color", Color(UiTheme.INK, 0.6))
+	var faint := StyleBoxFlat.new()
+	faint.bg_color = Color(1, 1, 1, 0.35)
+	faint.border_color = Color(UiTheme.INK, 0.35)
+	faint.set_border_width_all(2)
+	faint.set_content_margin_all(5)
+	_bar.add_theme_stylebox_override("normal", faint)
+	_bar.hide()
+	_panel.add_child(_bar)
+	_layout()
+	get_viewport().size_changed.connect(_layout)
+	get_node("/root/Net").chat_received.connect(add)
 
 
 ## Where the chat shows: a rectangle of the screen (the online lobby puts it
 ## under the computers' boxes), or null for the usual bottom left corner.
 func dock(rect) -> void:
-	if rect is Rect2:
-		_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-		_panel.position = rect.position
-		_panel.size = rect.size
-		_panel.custom_minimum_size = Vector2.ZERO
-	else:
-		_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-		_panel.offset_left = 16
-		_panel.offset_right = 576
-		_panel.offset_top = -330
-		_panel.offset_bottom = -64
 	_docked = rect is Rect2
+	if _docked:
+		_dock_rect = rect
+	_layout()
 	_shown = ""
 
 
-var _docked := false
+func _layout() -> void:
+	var screen := get_viewport().get_visible_rect().size
+	var r := _dock_rect if _docked else Rect2(16, screen.y - (430 if is_open() else 300) - 46, 560, 430 if is_open() else 300)
+	_panel.position = r.position
+	_panel.size = r.size
+	var input_h := 40.0
+	_input.position = Vector2(0, r.size.y - input_h)
+	_input.size = Vector2(r.size.x, input_h)
+	_bar.position = Vector2(0, r.size.y - 32)
+	_bar.size = Vector2(150, 30)
+	var bottom := r.size.y - (input_h + 6 if is_open() or _bar.visible else 0.0)
+	_scroll.position = Vector2.ZERO
+	_scroll.size = Vector2(r.size.x, maxf(0.0, bottom))
 
 
 func is_open() -> bool:
 	return _input.visible
 
 
-func open() -> void:
-	var net := get_node("/root/Net")
-	if not net.is_online() or is_open():
+## Opens the chat (`start`: text already typed, "!" for a command).
+func open(start := "") -> void:
+	if is_open():
 		return
 	_input.show()
-	_input.clear()
+	_input.text = start
+	_input.caret_column = start.length()
 	_input.grab_focus()
+	_history_pos = _history.size()
+	var net := get_node("/root/Net")
 	net.typing = true
+	if not net.is_online() and not get_tree().paused:
+		get_tree().paused = true  # offline: commands with the game stopped
+		_paused_by_us = true
+	_layout()
 	_shown = ""
 
 
 func close() -> void:
+	if not _input.visible:
+		return
 	_input.hide()
 	_input.release_focus()
 	var net := get_node_or_null("/root/Net")
 	if net:
 		net.typing = false
+	if _paused_by_us:
+		get_tree().paused = false
+		_paused_by_us = false
+	_layout()
 	_shown = ""
 
 
+## A message from someone ("" = the game itself).
 func add(who: String, text: String) -> void:
-	_lines.append([who, text, Time.get_ticks_msec() / 1000.0])
-	if _lines.size() > 50:
+	_lines.append([who, text, _now()])
+	if _lines.size() > KEEP:
 		_lines.pop_front()
 	_shown = ""
+
+
+## A line only this computer sees (command output; may use bbcode).
+func add_local(text: String) -> void:
+	add("*", text)
 
 
 func clear() -> void:
@@ -121,18 +160,62 @@ func clear() -> void:
 	_shown = ""
 
 
+func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
+
 func _send(text: String) -> void:
-	get_node("/root/Net").chat(text)
+	text = text.strip_edges()
+	if text != "" and text != "!":
+		_history.append(text)
+	var net := get_node("/root/Net")
+	if text.begins_with("!"):
+		var cmd := text.substr(1).strip_edges()
+		if cmd != "":
+			add_local("[color=#2f7a43]> !%s[/color]" % cmd.replace("[", "[lb]"))
+			var console := get_node_or_null("/root/Console")
+			if console:
+				console.run(cmd)
+	elif text != "":
+		if net.is_online():
+			net.chat(text)
+		else:
+			add_local("[color=#5c5a68]Nobody to talk to offline. Commands start with ! (try !help).[/color]")
 	close()
+
+
+func _on_key(e: InputEvent) -> void:
+	if not (e is InputEventKey and e.pressed):
+		return
+	match e.keycode:
+		KEY_ESCAPE:
+			close()
+		KEY_UP:
+			_recall(-1)
+		KEY_DOWN:
+			_recall(1)
+		KEY_TAB:
+			var console := get_node_or_null("/root/Console")
+			if console and _input.text.begins_with("!"):
+				_input.text = "!" + console.complete(_input.text.substr(1))
+				_input.caret_column = _input.text.length()
+		_:
+			return
+	_input.accept_event()
+
+
+func _recall(step: int) -> void:
+	if _history.is_empty():
+		return
+	_history_pos = clampi(_history_pos + step, 0, _history.size())
+	_input.text = _history[_history_pos] if _history_pos < _history.size() else ""
+	_input.caret_column = _input.text.length()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey and event.pressed and not event.echo) or is_open():
 		return
 	if not get_node("/root/Net").is_online():
-		return
-	var console := get_node_or_null("/root/Console")
-	if console and console.is_open():
 		return
 	var k: Key = event.physical_keycode if event.physical_keycode != 0 else event.keycode
 	if k in OPEN_KEYS and not _key_taken(k):
@@ -150,20 +233,36 @@ func _key_taken(k: Key) -> bool:
 	return false
 
 
+## In a level (not the menus): small and see-through.
+func _in_level() -> bool:
+	var s := get_tree().current_scene
+	return s != null and not s.scene_file_path.ends_with("main_menu.tscn")
+
+
 func _process(_d: float) -> void:
-	var now := Time.get_ticks_msec() / 1000.0
+	var net := get_node("/root/Net")
+	var in_level := _in_level()
+	# The faint bar: online, in a party, chat closed.
+	var bar: bool = net.is_online() and not is_open() and not _docked and in_level \
+		and get_tree().current_scene.has_node("PartyController")
+	if bar != _bar.visible:
+		_bar.visible = bar
+		_layout()
+	var now := _now()
 	var show := []
-	var keep := 3 if _docked else KEEP
+	var keep := 3 if _docked else (40 if is_open() else 8)
 	for l in _lines.slice(-keep):
 		var age: float = now - l[2]
 		if is_open() or age < SHOW_FOR:
 			show.append([l, 1.0 if is_open() else clampf(SHOW_FOR - age, 0.0, 1.0)])
-	var key := str(show.map(func(s): return [s[0][2], snappedf(s[1], 0.1)])) + str(is_open())
+	var key := str(show.map(func(s): return [s[0][2], snappedf(s[1], 0.1)])) + str([is_open(), in_level, _docked])
 	if key == _shown:
 		return
 	_shown = key
 	for c in _list.get_children():
 		c.queue_free()
+	var size := 19 if _docked else (16 if in_level and not is_open() else 20)
+	var see_through := 0.8 if in_level and not is_open() else 1.0
 	for s in show:
 		var l: Array = s[0]
 		var row := RichTextLabel.new()
@@ -174,15 +273,20 @@ func _process(_d: float) -> void:
 		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		row.add_theme_font_override("normal_font", UiTheme.FONT_MEDIUM)
 		row.add_theme_font_override("bold_font", UiTheme.FONT_BOLD)
-		row.add_theme_font_size_override("normal_font_size", 19 if _docked else 22)
-		row.add_theme_font_size_override("bold_font_size", 19 if _docked else 22)
+		row.add_theme_font_size_override("normal_font_size", size)
+		row.add_theme_font_size_override("bold_font_size", size)
 		row.add_theme_color_override("default_color", UiTheme.INK)
 		row.add_theme_color_override("font_outline_color", UiTheme.MARBLE)
-		row.add_theme_constant_override("outline_size", 6)
-		var text := str(l[1]).replace("[", "[lb]")
-		if str(l[0]) == "":
-			row.text = "[color=#5c5a68]%s[/color]" % text
+		row.add_theme_constant_override("outline_size", 5)
+		var who := str(l[0])
+		if who == "*":
+			row.text = str(l[1])  # our own command output (bbcode)
+		elif who == "":
+			row.text = "[color=#5c5a68]%s[/color]" % str(l[1]).replace("[", "[lb]")
 		else:
-			row.text = "[b]%s:[/b] %s" % [str(l[0]).replace("[", "[lb]"), text]
-		row.modulate.a = s[1]
+			row.text = "[b]%s:[/b] %s" % [who.replace("[", "[lb]"), str(l[1]).replace("[", "[lb]")]
+		row.modulate.a = s[1] * see_through
 		_list.add_child(row)
+	# Newest at the bottom.
+	await get_tree().process_frame
+	_scroll.scroll_vertical = int(_scroll.get_v_scroll_bar().max_value)

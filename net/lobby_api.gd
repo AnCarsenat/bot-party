@@ -14,6 +14,7 @@ var token := ""
 var _players := 0
 var _mode := ""
 var _names: Array = []
+var game_name := ""  # sent with each heartbeat (the host may rename itself)
 var _beat: Timer
 
 
@@ -49,6 +50,7 @@ func register(url: String, info: Dictionary, done: Callable) -> void:
 	base = normalize(url)
 	_players = int(info.get("players", 1))
 	_mode = info.get("mode", "")
+	game_name = str(info.get("name", ""))
 	_names = info.get("names", [])
 	_request("POST", "/api/host", info, func(ok: bool, data: Dictionary):
 		if ok and data.has("id"):
@@ -65,7 +67,10 @@ func heartbeat(players: int, mode: String, names := []) -> void:
 	_mode = mode
 	_names = names
 	if registered():
-		_request("POST", "/api/heartbeat", {"id": id, "token": token, "players": players, "mode": mode, "names": names}, func(_ok, _d): pass)
+		var body := {"id": id, "token": token, "players": players, "mode": mode, "names": names}
+		if game_name != "":
+			body["name"] = game_name
+		_request("POST", "/api/heartbeat", body, func(_ok, _d): pass)
 
 
 func close() -> void:

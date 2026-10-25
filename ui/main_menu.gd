@@ -316,9 +316,11 @@ func _show(screen: String, keep_index := false) -> void:
 						"info": "%s's computer. Jump: send them out of the game, or ban them." % who,
 						"peer": id, "on_accept": func(): _kick_peer = id; _show("kick")})
 				_items.append({"text": "Chat", "on_accept": func(): get_node("/root/Chat").open(), "info": "Talk to the others (C or / anywhere while online)."})
+				_items.append(_name_item())
 				_items.append({"text": "Close game", "on_accept": func(): Net.leave(); _show("online")})
 			else:
 				_items = [{"text": "Chat", "on_accept": func(): get_node("/root/Chat").open(), "info": "Talk to the others (C or / anywhere while online)."},
+					_name_item(),
 					{"text": "Leave", "on_accept": func(): Net.leave(); _show("online")}]
 		"kick":
 			var who := str(Net.computers.get(_kick_peer, "?"))
@@ -393,7 +395,7 @@ func _show(screen: String, keep_index := false) -> void:
 	_rebuild_list()
 	_refresh_info()
 	_refresh_footer()
-	_hint.text = ("Jump to join or leave" + ("    C: chat" if Net.is_online() else "")) if lobby else ""
+	_hint.text = "Jump to join or leave" if lobby else ""
 	_lobby.mouse_filter = Control.MOUSE_FILTER_STOP if screen == "players" or screen == "online_lobby" else Control.MOUSE_FILTER_IGNORE
 	# Online lobby: the chat goes under the computers' boxes.
 	var chat := get_node_or_null("/root/Chat")
@@ -409,8 +411,14 @@ func _show(screen: String, keep_index := false) -> void:
 	_lobby._scroll_focus = -1
 	if screen == "players" and not Net.is_online():
 		_hint.text = "Jump: join / leave    Arrows: choose a slot    Delete: remove    +: add a bot / how good"
-	if screen == "online_lobby" and Net.is_client():
-		_hint.text = "Jump to join or leave    C: chat    Waiting for the host to start."
+	if screen == "online_lobby":
+		if not keep_index:
+			_set_lobby_focus("players" if Net.my_slots().is_empty() else "menu")
+		else:
+			_set_lobby_focus(_lobby_focus)
+	else:
+		_list.modulate.a = 1.0
+		_cable.visible = true
 	_cable.snap = true
 
 
@@ -424,7 +432,12 @@ func _rebuild_list() -> void:
 		row.index = i
 		row.custom_minimum_size = Vector2(520, 64)
 		row.mouse_entered.connect(func(): _select(i))
-		row.gui_input.connect(func(e): if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT: _select(i); _accept())
+		row.gui_input.connect(func(e):
+			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+				if _screen == "online_lobby":
+					_set_lobby_focus("menu")
+				_select(i)
+				_accept())
 		_list.add_child(row)
 		_rows.append(row)
 
@@ -534,6 +547,16 @@ func _game_folder() -> String:
 
 var _servers: Array = []
 var _kick_peer := 0  # host: whose computer the Kick / ban screen is about
+var _lobby_focus := "menu"  # online lobby: "menu" (the options) or "players" (your box)
+
+
+func _set_lobby_focus(f: String) -> void:
+	_lobby_focus = f
+	_list.modulate.a = 0.45 if f == "players" else 1.0
+	_cable.visible = f == "menu"
+	if _screen == "online_lobby":
+		_hint.text = ("Jump: join / leave    Left: menu    C: chat" if f == "players"
+			else "Right: your players    C: chat") + ("    Waiting for the host to start." if Net.is_client() else "")
 var _listing := false
 var _last_address := ""
 var _editor: PanelContainer
@@ -545,9 +568,15 @@ func _host(public: bool) -> void:
 
 
 func _set_name(t: String) -> void:
-	Net.player_name = t.strip_edges().left(16) if t.strip_edges() != "" else "Player"
-	Net.save_config()
-	_show("online", true)
+	Net.rename(t if t.strip_edges() != "" else "Player")  # online: everyone sees it
+	_show("online_lobby" if Net.is_online() else "online", true)
+
+
+## "Name: Elian" in the online lobby: rename yourself, everyone sees it.
+func _name_item() -> Dictionary:
+	return {"text": "Name: " + Net.player_name.left(12), "size": 34,
+		"on_accept": func(): _edit_text("Your name", Net.player_name, _set_name),
+		"info": "What the others see you as (your box, your robots, the chat)."}
 
 
 func _set_lobby_url(t: String) -> void:
@@ -600,6 +629,7 @@ func _edit_text(title: String, initial: String, done: Callable) -> void:
 	hint.add_theme_color_override("font_color", UiTheme.MUTED)
 	col.add_child(hint)
 	add_child(_editor)
+	Net.typing = true  # online: typing doesn't move your robots
 	edit.grab_focus()
 	edit.caret_column = initial.length()
 	edit.text_submitted.connect(func(t):
@@ -615,6 +645,7 @@ func _close_editor() -> void:
 	if _editor:
 		_editor.queue_free()
 		_editor = null
+	Net.typing = false
 
 
 func _campaign_heading() -> String:
@@ -846,7 +877,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if _editor:
 		return
-	if _screen == "online_lobby":
+	if _screen == "online_lobby" and _lobby_focus == "players":
+		# Your box has the focus: each key set's jump adds or takes away its
+		# player; left (or back) goes to the menu.
 		var who := _player_action(event, "action_1")
 		if who:
 			if who in Net.my_slots().values():
@@ -855,6 +888,20 @@ func _unhandled_input(event: InputEvent) -> void:
 				Net.request_join(who)
 			_handled(stick)
 			return
+		if event.is_action_pressed("ui_left", true) or _player_action(event, "move_left") \
+				or event.is_action_pressed("ui_cancel") or event.is_action_pressed("pause") or _player_action(event, "action_2"):
+			_set_lobby_focus("menu")
+			_handled(stick)
+			return
+		if event.is_action_pressed("ui_up", true) or event.is_action_pressed("ui_down", true) or event.is_action_pressed("ui_right", true) \
+				or _player_action(event, "move_up") or _player_action(event, "move_down") or _player_action(event, "move_right"):
+			_handled(stick)  # nothing to move to there
+		return
+	if _screen == "online_lobby" and (event.is_action_pressed("ui_right", true) or _player_action(event, "move_right")) \
+			and not _items[_index].has("on_right"):
+		_set_lobby_focus("players")
+		_handled(stick)
+		return
 	if _screen == "players":
 		var toggler := _player_action(event, "action_1")
 		if toggler:
@@ -897,14 +944,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("ui_down", true) or _player_action(event, "move_down"):
 		_move(1); _handled(stick)
 	elif event.is_action_pressed("ui_left", true) or _player_action(event, "move_left"):
-		if _items[_index].has("on_left"): _items[_index].on_left.call()
+		if _items[_index].has("on_left"):
+			_items[_index].on_left.call()
+		elif not _screen in ["main", "online_lobby"]:
+			_back()  # left with nothing to change: back
 		_handled(stick)
 	elif event.is_action_pressed("ui_right", true) or _player_action(event, "move_right"):
 		if _items[_index].has("on_right"): _items[_index].on_right.call()
 		_handled(stick)
 	elif event.is_action_pressed("ui_accept") or _player_action(event, "action_1"):
 		_accept(); _handled(stick)
-	elif event.is_action_pressed("ui_cancel") or event.is_action_pressed("pause"):
+	elif event.is_action_pressed("ui_cancel") or event.is_action_pressed("pause") or _player_action(event, "action_2"):
 		if _screen != "main":
 			_back()
 		_handled(stick)
@@ -1105,6 +1155,8 @@ class _Lobby extends Control:
 				_scroll_to = (roundf(_scroll_to / row) + 1.0) * row
 			elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
 				_scroll_to = maxf(0.0, (roundf(_scroll_to / row) - 1.0) * row)
+			elif event.button_index == MOUSE_BUTTON_LEFT and menu:
+				menu._set_lobby_focus("players")
 			return
 		if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
 			return
@@ -1238,8 +1290,11 @@ class _Lobby extends Control:
 			if r.position.y < -2.0 or r.end.y > area.y + 2.0:
 				continue  # only whole boxes (it's scrolling)
 			var mine := peer == Net.my_id()
+			var focused: bool = mine and menu and menu._lobby_focus == "players"
 			draw_rect(r, UiTheme.LIME if mine else Color.WHITE)
-			draw_rect(r, UiTheme.ACCENT if mine else UiTheme.INK, false, 4.0 if mine else 3.0)
+			if focused:
+				draw_rect(r.grow(4), UiTheme.LIVE, false, 4.0)  # where your keys go now
+			draw_rect(r, UiTheme.ACCENT if mine else UiTheme.INK, false, 5.0 if focused else (4.0 if mine else 3.0))
 			var title := str(Net.computers.get(peer, Net.player_name if mine else Net._name_of_peer(peer)))
 			var tags := []
 			if peer == 1:

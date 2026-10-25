@@ -93,6 +93,8 @@ class Lobby:
             s.info["mode"] = str(body.get("mode", s.info["mode"]))[:12]
             if "names" in body:
                 s.info["names"] = clean_names(body.get("names"))
+            if "name" in body:
+                s.info["name"] = str(body.get("name"))[:40] or s.info["name"]
             return {"ok": True}
         if path == "/api/close":
             self.remove(s.id)
