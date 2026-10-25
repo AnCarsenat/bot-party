@@ -100,7 +100,9 @@ func _ready() -> void:
 	_add_hurtbox()
 	add_to_group("net_sync")
 	if NetCheck.client(self):
-		set_physics_process(false)  # online client: the host moves us
+		# Online client: the host moves the others; our own robots move here
+		# right away (predicted) and are nudged to where the host has them.
+		set_physics_process(_predicted())
 
 
 # --- Online ---------------------------------------------------------------------
@@ -111,20 +113,37 @@ var _net_target := Vector2.INF
 func net_state() -> Array:
 	return [Vector2i(global_position.round()), _sprite.frame, _face.frame, _sprite.flip_h,
 		_sprite.scale, visible, get_meta("eliminated", false), get_meta("finished", false),
-		get_meta("coin", false), snappedf(modulate.a, 0.05), [] if get_meta("eliminated", false) else statuses.keys()]
+		get_meta("coin", false), snappedf(modulate.a, 0.05), [] if get_meta("eliminated", false) else statuses.keys(),
+		is_physics_processing()]
+
+
+## Online client: is this one of our own robots (moved here, not by the host)?
+func _predicted() -> bool:
+	var net := get_tree().root.get_node_or_null("Net") if is_inside_tree() else null
+	return net != null and net.is_client() and net.my_slots().has(get_meta("player_index", 0) + 1)
+
+
+var _history: Array = []  # predicted: [msec, position] of the last second
 
 
 func net_apply(s: Array) -> void:
-	set_physics_process(false)
 	var pos := Vector2(s[0])
-	if _net_target == Vector2.INF or global_position.distance_to(pos) > 200.0:
-		global_position = pos  # first update or teleport (respawn, door...)
-	_net_target = pos
-	_sprite.frame = s[1]
-	_face.frame = s[2]
-	_sprite.flip_h = s[3]
-	_face.flip_h = s[3]
-	_sprite.scale = s[4]
+	var predicted := _predicted()
+	if predicted:
+		# Moving it ourselves (the host says when it can move at all).
+		set_physics_process(s[11] if s.size() > 11 else true)
+		_net_target = Vector2.INF
+		_correct(pos)
+	else:
+		set_physics_process(false)
+		if _net_target == Vector2.INF or global_position.distance_to(pos) > 200.0:
+			global_position = pos  # first update or teleport (respawn, door...)
+		_net_target = pos
+		_sprite.frame = s[1]
+		_face.frame = s[2]
+		_sprite.flip_h = s[3]
+		_face.flip_h = s[3]
+		_sprite.scale = s[4]
 	visible = s[5]
 	set_meta("finished", s[7])
 	set_meta("coin", s[8])
@@ -143,6 +162,36 @@ func net_apply(s: Array) -> void:
 func _process(delta: float) -> void:
 	if _net_target != Vector2.INF:
 		global_position = global_position.lerp(_net_target, 1.0 - exp(-30.0 * delta))
+
+
+## Predicted robot: where the host has it is where we were about one round
+## trip ago; if that's off, part of the difference is made up (all of it when
+## far: a respawn or a teleport).
+func _correct(host_pos: Vector2) -> void:
+	var net := get_tree().root.get_node("Net")
+	var then: int = Time.get_ticks_msec() - net.round_trip_ms() - 20
+	var was := global_position
+	for h in _history:
+		if h[0] <= then:
+			was = h[1]
+		else:
+			break
+	var off := host_pos - was
+	if off.length() > 220.0:
+		global_position = host_pos
+		_history.clear()
+	elif off.length() > 6.0:
+		var step := off * 0.2
+		global_position += step
+		for h in _history:
+			h[1] += step  # (so the same difference isn't made up twice)
+
+
+func _record_history() -> void:
+	var now := Time.get_ticks_msec()
+	_history.append([now, global_position])
+	while not _history.is_empty() and now - _history[0][0] > 1000:
+		_history.pop_front()
 
 
 func _add_hurtbox() -> void:
@@ -203,7 +252,9 @@ func _tick_statuses(delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	_tick_statuses(delta)
+	var predicted := NetCheck.client(self)  # (only our own robots move on a client)
+	if not predicted:
+		_tick_statuses(delta)  # a client shows the host's statuses
 	if _prev_position != Vector2.INF and delta > 0.0:
 		actual_velocity = (global_position - _prev_position) / delta
 	_prev_position = global_position
@@ -212,8 +263,11 @@ func _physics_process(delta: float) -> void:
 			platformer_movement(delta)
 		MovementTypes.TOP_DOWN:
 			top_down_movement()
-	_push_bodies()
-	_shove_machines()
+	if predicted:
+		_record_history()
+	else:
+		_push_bodies()  # crates and machines: the host moves them
+		_shove_machines()
 	_animate(delta)
 
 

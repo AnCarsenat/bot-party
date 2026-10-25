@@ -405,6 +405,14 @@ func _keyboard(local: int) -> PackedByteArray:
 	return v
 
 
+## Online client: the round trip to the host, in ms (0 offline / host).
+func round_trip_ms() -> int:
+	if not is_client() or _peer == null:
+		return 0
+	var p := _peer.get_peer(1)
+	return int(p.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)) if p else 0
+
+
 ## Our own players: their key sets press their game slots' buttons here.
 var _mirrored := {}  # slot -> last strengths
 func _mirror_keys() -> void:
