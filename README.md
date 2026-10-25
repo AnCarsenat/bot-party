@@ -78,12 +78,18 @@ Join from **Players** (press your jump key), then pick **Campaign** or **Party**
 | P3 | I J K L | N | U | O |
 | P4 | Numpad 8 4 5 6 | Numpad 0 | Numpad Enter | Numpad + |
 | P5 | T F G H | V | B | Y |
-| P6 to P8 | Gamepads 1 to 3 | | | |
+| Gamepads | Stick or D-pad | Bottom button | Left button | Top button |
 
 Keys are given by position, so on an AZERTY keyboard P1 plays with Z Q S D.
 **Settings → Controls** changes any player's keys. If keys stop responding when
 several people share a keyboard, the keyboard can't register that many keys at
 once: give each player keys that are further apart.
+
+Plug in as many **gamepads** as you like (Xbox, PlayStation, Switch Pro
+controllers, Joy-Cons...). A pad takes a free player when you press one of its
+buttons (P6, P7, P8 first, then P5, P4...); **Settings → Controls → Gamepads**
+changes who it plays. Buttons go by position: jump is the bottom one (A on Xbox,
+B on Switch, Cross on PlayStation).
 
 Turn and Flip rotate and mirror items while you place them in party mode.
 

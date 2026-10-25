@@ -67,6 +67,10 @@ func _ready() -> void:
 		elif _screen == "kick" and not Net.computers.has(_kick_peer):
 			_show("online_lobby" if Net.is_online() else "online"))
 	Net.servers_listed.connect(_on_servers)
+	Pads.changed.connect(func():
+		if _screen == "controls" and _capture == "":
+			_show("controls", true)
+		_lobby.queue_redraw())
 	Net.mods_offered.connect(func(list):
 		if is_inside_tree():
 			_mods_offer = list
@@ -391,6 +395,20 @@ func _show(screen: String, keep_index := false) -> void:
 					"info": "Jump: change this key.\nKeys dropping out with several players on one keyboard? Keep each player's keys far apart."})
 			_items.append({"text": "Reset all", "info": "Every player back to the usual keys.", "on_accept": func():
 				PlayerKeys.reset(); _hint.text = "Keys reset"; _show("controls", true)})
+			_items.append({"text": "Gamepads", "enabled": false, "size": 26, "heading": true})
+			var pads: Array = Pads.connected()
+			if pads.is_empty():
+				_items.append({"text": "None plugged in", "enabled": false, "size": 30})
+			for p in pads:
+				var device: int = p[0]
+				var cycle := func(d: int):
+					# Nobody, then P1..P8.
+					Pads.assign(device, posmod(Pads.slot_of(device) + d, 9))
+					_show("controls", true)
+				_items.append({"text": str(p[1]).left(16), "size": 30,
+					"value": func(): return "< P%d >" % Pads.slot_of(device) if Pads.slot_of(device) else "< Nobody >",
+					"on_left": func(): cycle.call(-1), "on_right": func(): cycle.call(1),
+					"info": "Left / right: who this pad plays.\nA pad takes a free player when you press one of its buttons (P6, P7, P8 first). Jump is the bottom button (%s on this one), turn and flip the left and top ones." % Pads.button_text(device, JOY_BUTTON_A)})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"mods":
 			Mods.scan()

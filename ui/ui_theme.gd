@@ -116,16 +116,20 @@ static func jump_key_text(n: int) -> String:
 	return action_key_text(n, 1)
 
 
-## The key for a player's action 1, 2 or 3 ("Space", "E", "Pad 1 X").
+## The key for a player's action 1, 2 or 3 ("Space", "E", "Pad 1 X", "Pad 2 B"
+## on a Switch pad). A player a pad plays shows the pad's button.
 static func action_key_text(n: int, action: int) -> String:
 	var name: String = _keys_of(n) + "action_%d" % action
 	if not InputMap.has_action(name):
 		return "-"
-	for ev in InputMap.action_get_events(name):
-		if ev is InputEventJoypadButton:
-			return "Pad %d %s" % [ev.device + 1, ["A", "B", "X", "Y"][clampi(ev.button_index, 0, 3)]]
+	var events := InputMap.action_get_events(name)
+	var pads: Node = Engine.get_main_loop().root.get_node_or_null("Pads") if Engine.get_main_loop() is SceneTree else null
+	for ev in events:
+		if ev is InputEventJoypadButton and pads:
+			return "Pad %d %s" % [ev.device + 1, pads.button_text(ev.device, ev.button_index)]
+	for ev in events:
 		return _event_text(ev)
-	return "-"
+	return "Any pad"
 
 
 ## Readable controls for player n (1-based), from the Input Map.
@@ -135,13 +139,17 @@ static func controls_text(n: int) -> String:
 		var name: String = _keys_of(n) + action
 		if not InputMap.has_action(name):
 			continue
-		for ev in InputMap.action_get_events(name):
+		var events: Array = InputMap.action_get_events(name)
+		var pad := events.filter(func(ev): return ev is InputEventJoypadButton or ev is InputEventJoypadMotion)
+		if not pad.is_empty():
+			events = pad  # a pad plays them
+		for ev in events:
 			parts.append(_event_text(ev))
 			break
 	if parts.is_empty():
-		return "-"
+		return "Any pad: press a button"
 	if parts[0].begins_with("Pad"):
-		return parts[0] + " stick or D-pad, A to jump"
+		return parts[0] + " stick or D-pad, %s to jump" % jump_key_text(n).get_slice(" ", 2)
 	return "%s %s to move, %s to jump" % parts
 
 
