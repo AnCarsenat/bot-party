@@ -97,11 +97,33 @@ func net_state() -> Array:
 
 
 func net_apply(s: Array) -> void:
-	_progress = s[0]
-	_direction = s[1]
 	if s[2] != _toggled_on:
 		_toggled_on = s[2]
 		_update_active()
+	# The host's news is half a round trip old, and our own robot is ahead of it
+	# by about as much: the platform is shown where the host will have it then,
+	# so landing on it here matches the host. Small differences are blended in.
+	var p: float = s[0]
+	var dir: int = s[1]
+	var ahead := NetCheck.lead(self) / maxf(move_time, 0.01)
+	if move_offset != Vector2.ZERO and ahead > 0.0:
+		match controls:
+			Controls.MOVE_TO_END:
+				p = move_toward(p, 1.0 if active else 0.0, ahead)
+			_:
+				if controls == Controls.SOLIDITY or active:
+					p += ahead * dir
+					if p > 1.0:
+						p = 2.0 - p
+						dir = -1
+					elif p < 0.0:
+						p = -p
+						dir = 1
+	if absf(p - _progress) < 0.04 and dir == _direction:
+		_progress = lerpf(_progress, p, 0.3)
+	else:
+		_progress = clampf(p, 0.0, 1.0)
+		_direction = dir
 
 
 func _on_input_toggled(_state: bool) -> void:

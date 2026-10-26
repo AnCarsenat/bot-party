@@ -763,6 +763,8 @@ func _exists(p: String) -> bool:
 
 func _pack_files() -> Array:
 	var out := []
+	if not DirAccess.dir_exists_absolute(DIR):
+		return out  # (first start: no mods folder yet)
 	for f in DirAccess.get_files_at(DIR):
 		if f.get_extension().to_lower() in ["pck", "zip"]:
 			out.append(DIR.path_join(f))

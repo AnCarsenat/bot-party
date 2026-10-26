@@ -33,6 +33,10 @@ const ACTIONS := ["move_left", "move_right", "move_up", "move_down", "action_1",
 const SNAPSHOT_EVERY := 2
 const FULL_EVERY := 60
 const DIRECT_TIMEOUT := 3.0
+## A change in a snapshot is sent again in this many following ones (lost packets).
+const RESEND := 3
+## Copies of a change in a client's buttons, in the following physics frames.
+const INPUT_COPIES := 4
 const CONFIG_PATH := "user://online.cfg"
 
 var mode := Mode.OFFLINE
@@ -1226,17 +1230,30 @@ func _physics_process(_d: float) -> void:
 			_send_mod_chunks()
 
 
-## Client: our players' buttons -> host (only when something changed).
+## Client: our players' buttons -> host. Sent when they change, then again in
+## the next few physics frames: these packets aren't resent when lost (resending
+## takes a round trip or more), so a copy gets through instead, and nothing
+## waits for a lost one. Every 10 frames anyway, in case.
+var _input_repeat := {}  # slot -> copies still to send
 func _send_inputs() -> void:
 	for slot in my_slots():
 		var local: int = my_slots()[slot]
 		var v := _keyboard(local)
+		var send := false
 		if _last_input.get(slot) != v:
 			_last_input[slot] = v
+			_input_repeat[slot] = INPUT_COPIES
+			send = true
+		elif int(_input_repeat.get(slot, 0)) > 0:
+			_input_repeat[slot] = int(_input_repeat[slot]) - 1
+			send = true
+		elif Engine.get_physics_frames() % 10 == 0:
+			send = true
+		if send:
 			_remote_input.rpc_id(1, slot, v)
 
 
-@rpc("any_peer", "call_remote", "reliable")
+@rpc("any_peer", "call_remote", "unreliable_ordered")
 func _remote_input(slot: int, v: PackedByteArray) -> void:
 	if not is_host():
 		return
@@ -1425,10 +1442,15 @@ func _send_snapshot(full: bool) -> void:
 func _add_entry(key: String, st, full: bool, entries: Array, new_keys: Dictionary) -> void:
 	var id := _id_for(key, new_keys)
 	var forced: int = _force.get(id, 0)
-	if full or forced > 0 or _sent.get(key) != st:
+	var changed: bool = _sent.get(key) != st
+	if full or forced > 0 or changed:
 		_sent[key] = st
 		entries.append(id)
 		entries.append(st)
+		if changed:
+			# Snapshots can get lost on the way (they're never sent twice):
+			# a change goes out in the next few ones too.
+			forced = maxi(forced, RESEND + 1)
 		if forced > 0:
 			_force[id] = forced - 1
 			if forced == 1:
