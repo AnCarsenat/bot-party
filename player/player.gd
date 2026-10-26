@@ -220,7 +220,9 @@ func _process(delta: float) -> void:
 	if _net_target != Vector2.INF:
 		var ahead := clampf((Time.get_ticks_msec() - _net_at) / 1000.0, 0.0, 0.08)
 		var aim := _net_target + _net_vel * ahead
+		var before := global_position
 		global_position = global_position.lerp(aim, 1.0 - exp(-18.0 * delta))
+		_stack_with_ours(global_position - before)
 	elif _nudge != Vector2.ZERO:
 		# Predicted: a correction made up over a few frames, not in one jump.
 		var step := _nudge * minf(1.0, 12.0 * delta)
@@ -230,6 +232,20 @@ func _process(delta: float) -> void:
 			h[1] += step  # (so the same difference isn't made up twice)
 		if _nudge.length() < 0.5:
 			_nudge = Vector2.ZERO
+
+
+## Online client, a robot the host moves: our own robots standing on it come
+## along, and it standing on one of ours counts as riding it (carried, and it
+## doesn't block it), like when both move on the same computer.
+func _stack_with_ours(moved: Vector2) -> void:
+	if moved != Vector2.ZERO:
+		for r in _current_riders():
+			if NetCheck.moves(r):
+				r.carry(moved)
+	var probe := move_and_collide(Vector2(0, 4), true, 0.08, true)
+	if probe and probe.get_normal().dot(up_direction) >= 0.7 and probe.get_collider() is CharacterBody2D \
+			and probe.get_collider().has_method("add_rider") and NetCheck.moves(probe.get_collider()):
+		probe.get_collider().add_rider(self)
 
 
 ## Predicted robot: where the host has it is where we were about one round
@@ -611,6 +627,15 @@ func _follow_remote(b: Array, delta: float) -> void:
 		return
 	_far_time = 0.0
 	_prev_position = global_position
+	# Standing on someone / someone standing on us: carried like offline.
+	var below := player_below()
+	if below != null:
+		below.add_rider(self)
+		_last_below = below
+	var riders := _current_riders()
+	for r in riders:
+		add_collision_exception_with(r)
+	var before := global_position
 	velocity = (target - global_position) / maxf(delta, 0.001)
 	# Pushing a crate there (where it's stuck until ours moves): we push it here
 	# at walking speed; the crate's moves reach the client, and its robot follows.
@@ -625,6 +650,14 @@ func _follow_remote(b: Array, delta: float) -> void:
 	_shove_machines()
 	if global_position.distance_to(target) > (90.0 if pushing else 24.0):
 		global_position = target
+	for r in riders:
+		if is_instance_valid(r):
+			remove_collision_exception_with(r)
+	var moved := global_position - before
+	if moved != Vector2.ZERO:
+		for r in riders:
+			if is_instance_valid(r):
+				r.carry(moved)
 	velocity = Vector2(b[2], b[3])
 	actual_velocity = velocity
 	_animate(delta)
