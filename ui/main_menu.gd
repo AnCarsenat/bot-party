@@ -282,10 +282,11 @@ func _show(screen: String, keep_index := false) -> void:
 				{"text": "Host public game", "on_accept": func(): _start(func(): _host(true)),
 					"info": "Listed on the server list. Friends can join from anywhere."},
 				{"text": "Host private game", "on_accept": func(): _start(func(): _host(false)),
-					"info": "Not listed: friends join with your address (UDP port %d)." % Net.host_port},
+					"info": "Not listed: friends join with your address (UDP port %d).%s" % [Net.host_port,
+						("\nYour IPv6 address works from anywhere with IPv6:\n" + Net.my_ipv6()) if Net.my_ipv6() != "" else ""]},
 				{"text": "Server list", "on_accept": func(): _listing = true; _servers.clear(); _show("servers"); Net.list_servers(),
 					"info": "Games hosted by others." if Net.lobby_url != "" else "Set the server list address first."},
-				{"text": "Join by address", "on_accept": func(): _start(func(): _edit_text("Host address (ip or ip:port)", _last_address,
+				{"text": "Join by address", "on_accept": func(): _start(func(): _edit_text("Host address (ip, ip:port or IPv6)", _last_address,
 					func(t): _last_address = t; _hint.text = "Connecting..."; Net.join_address(t))), "info": "Type the host's address."},
 				{"text": "Port: %d" % Net.host_port, "on_accept": func(): _edit_text("UDP port to host on (1024-65535)", str(Net.host_port), func(t):
 					if t.strip_edges().is_valid_int():
@@ -335,6 +336,7 @@ func _show(screen: String, keep_index := false) -> void:
 						"info": "%s's computer. Jump: send them out of the game, or ban them." % who,
 						"peer": id, "on_accept": func(): _kick_peer = id; _show("kick")})
 				_items.append({"text": "Chat", "on_accept": func(): get_node("/root/Chat").open(), "info": "Talk to the others (C or / anywhere while online)."})
+				_items.append(_address_item())
 				_items.append(_name_item())
 				_items.append({"text": "Close game", "on_accept": func(): Net.leave(); _show("online")})
 			else:
@@ -716,10 +718,30 @@ static func _room_waiting(entry: Dictionary) -> bool:
 	return str(entry.get("mode", "")) in ["", "lobby"]
 
 
+## Online lobby (host): the addresses friends can type in Join by address.
+func _address_item() -> Dictionary:
+	var port: int = Net.hosted_port
+	var v6 := Net.my_ipv6()
+	var lines := []
+	if v6 != "":
+		lines.append("IPv6 (from anywhere, if both have IPv6):\n" + Net.address_text(v6, port))
+	var lan := Net._lan_ip()
+	if lan != "":
+		lines.append("Same network: " + Net.address_text(lan, port))
+	lines.append("Otherwise your public IPv4 address, with UDP port %d open on your router." % port)
+	var best := Net.address_text(v6, port) if v6 != "" else (Net.address_text(lan, port) if lan != "" else "")
+	return {"text": "Your address", "info": "\n".join(lines) + ("\nJump: copy it." if best != "" else ""),
+		"on_accept": func():
+			if best != "":
+				DisplayServer.clipboard_set(best)
+				_hint.text = "Copied: " + best}
+
+
 func _online_heading() -> String:
 	if Net.is_host():
 		return "Your game: %d / %d players" % [Net.taken_places(), GameState.MAX_PLAYERS]
-	return ("In %s's game" % Net.name_of(1)) if Net.name_of(1) != "" else "Online"
+	var conn := Net.connection_text()
+	return (("In %s's game" % Net.name_of(1)) if Net.name_of(1) != "" else "Online") + (("  (%s)" % conn) if conn != "" else "")
 
 
 ## Small text box for names and addresses. Enter confirms, Esc cancels.

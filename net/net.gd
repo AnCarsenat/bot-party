@@ -8,7 +8,9 @@ extends Node
 ## "net_sync" group implement net_state() / net_apply()), and clients only display.
 ##
 ## Ways to connect:
-##  - direct: ENet to the host's IP (the host needs UDP port GAME_PORT open)
+##  - direct: ENet to the host's IP (the host needs UDP port GAME_PORT open).
+##    IPv6 first when both computers have it: no NAT in the way, usually just
+##    the router's firewall.
 ##  - server list: the host registers on a lobby server (server/lobby_server.py on a
 ##    VPS); clients pick it from the list and connect directly, or through the
 ##    lobby server's relay when a direct connection doesn't work.
@@ -64,6 +66,8 @@ var _last_input := {}           # client: slot -> PackedFloat32Array
 var _applying := false          # applying something that came from the host
 var _connect_timer: SceneTreeTimer
 var _pending_relay := {}        # client: listing to fall back to if direct fails
+var _next_direct: Array = []    # client: [ip, port, text] to try if this one fails
+var hosted_port := GAME_PORT    # host: the UDP port it really got
 var _hosting_public := false
 var _quitting := false
 
@@ -233,6 +237,7 @@ func host(public: bool) -> Error:
 	_hosting_public = public
 	if public:
 		_register(port)
+	hosted_port = port
 	status.emit("Hosting on port %d" % port)
 	roster_changed.emit()
 	return OK
@@ -243,7 +248,7 @@ func _register(port: int) -> void:
 		status.emit("Hosting (not listed: no server list address set)")
 		return
 	var info := {"name": server_name, "port": port, "max": GameState.MAX_PLAYERS,
-		"players": roster.size(), "mode": _mode_text(), "lan_ip": _lan_ip(), "names": room_names()}
+		"players": roster.size(), "mode": _mode_text(), "lan_ip": _lan_ip(), "ip6": my_ipv6(), "names": room_names()}
 	_lobby.register(lobby_url, info, func(ok: bool, data: Dictionary):
 		if ok and not is_host():
 			_lobby.close()  # closed the game before the list answered: unlist it
@@ -589,6 +594,18 @@ func _keyboard(local: int) -> PackedByteArray:
 	return v
 
 
+## Client: how we're connected ("direct, IPv6, 24 ms", "relay, 310 ms").
+func connection_text() -> String:
+	if not is_client() or _peer == null:
+		return ""
+	var how := "relay"
+	if _relay_client == null:
+		var p := _peer.get_peer(1)
+		var addr := p.get_remote_address() if p else ""
+		how = "direct, IPv6" if addr.contains(":") and not addr.begins_with("::ffff:") else "direct"
+	return "%s, %d ms" % [how, round_trip_ms()]
+
+
 ## Online client: the round trip to the host, in ms (0 offline / host).
 func round_trip_ms() -> int:
 	if not is_client() or _peer == null:
@@ -640,20 +657,48 @@ func _restore_keys(slot: int) -> void:
 
 # --- Client --------------------------------------------------------------------
 
-## Connects straight to an address ("1.2.3.4" or "1.2.3.4:7777").
+## Connects straight to an address: "1.2.3.4", "1.2.3.4:7777", a name, or IPv6
+## ("2a01:e0a::1" or "[2a01:e0a::1]:7777").
 func join_address(address: String) -> void:
 	leave()
-	var host_ip := address.strip_edges()
-	var port := GAME_PORT
-	if host_ip.count(":") == 1:
-		port = int(host_ip.get_slice(":", 1))
-		host_ip = host_ip.get_slice(":", 0)
-	if not host_ip.is_valid_ip_address():
-		host_ip = IP.resolve_hostname(host_ip, IP.TYPE_IPV4)
+	var parts := parse_address(address)
+	var host_ip: String = parts[0]
+	if host_ip != "" and not host_ip.is_valid_ip_address():
+		host_ip = IP.resolve_hostname(host_ip, IP.TYPE_ANY)
 	if host_ip == "":
 		failed.emit("Unknown address")
 		return
-	_start_client(host_ip, port, "Connecting to %s..." % address)
+	_start_client(host_ip, parts[1], "Connecting to %s..." % address.strip_edges())
+
+
+## "host:port", "[ipv6]:port" or a bare address / IPv6 -> [host, port].
+static func parse_address(text: String) -> Array:
+	text = text.strip_edges()
+	if text.begins_with("["):
+		var end := text.find("]")
+		if end < 0:
+			return [text.trim_prefix("["), GAME_PORT]
+		var rest := text.substr(end + 1)
+		return [text.substr(1, end - 1), int(rest.trim_prefix(":")) if rest.begins_with(":") and rest.length() > 1 else GAME_PORT]
+	if text.count(":") == 1:
+		return [text.get_slice(":", 0), int(text.get_slice(":", 1))]
+	return [text, GAME_PORT]  # a name, IPv4, or IPv6 without a port
+
+
+## This computer's public IPv6 address ("" without one): what friends can
+## connect to directly, nothing in between but the router's firewall.
+static func my_ipv6() -> String:
+	for a in IP.get_local_addresses():
+		if a.contains(":") and not a.contains("%") and a.length() > 4 and a[0] in ["2", "3"]:
+			return a  # global (2000::/3), not link-local (fe80) or private (fd00)
+	return ""
+
+
+## An address as people type it ("[2a01::1]:7777" for IPv6 with a port).
+static func address_text(ip: String, port: int) -> String:
+	if ip.contains(":"):
+		return "[%s]:%d" % [ip, port] if port != GAME_PORT else ip
+	return "%s:%d" % [ip, port] if port != GAME_PORT else ip
 
 
 ## Joins a game from the server list: directly if possible, else through the relay.
@@ -661,12 +706,23 @@ func join_listed(entry: Dictionary, my_public_ip: String) -> void:
 	leave()
 	_pending_relay = entry if entry.get("relay", false) else {}
 	var ip: String = entry.get("ip", "")
+	var port := int(entry.port)
+	var tries := []
 	if ip == my_public_ip and entry.get("lan_ip", "") != "":
-		ip = entry.lan_ip  # same network as the host: use its local address
-	if ip == "" or not entry.get("direct", true):
+		tries.append([entry.lan_ip, port])  # same network as the host: its local address
+	else:
+		# IPv6 first when we both have it: straight there, no NAT in between.
+		if str(entry.get("ip6", "")) != "" and my_ipv6() != "":
+			tries.append([str(entry.ip6), port])
+		if ip != "" and entry.get("direct", true):
+			tries.append([ip, port])
+	if tries.is_empty():
 		_join_relay()
 		return
-	_start_client(ip, int(entry.port), "Connecting to %s..." % entry.name)
+	for t in tries:
+		t.append("Connecting to %s%s..." % [entry.name, " (IPv6)" if str(t[0]).contains(":") else ""])
+	_next_direct = tries.slice(1)
+	_start_client(tries[0][0], tries[0][1], tries[0][2])
 
 
 func _join_relay() -> void:
@@ -700,7 +756,8 @@ func _start_client(ip: String, port: int, text: String) -> void:
 	_take_keys()
 	status.emit(text)
 	var attempt := _peer
-	_connect_timer = get_tree().create_timer(DIRECT_TIMEOUT if not _pending_relay.is_empty() else 10.0)
+	var more := not _pending_relay.is_empty() or not _next_direct.is_empty()
+	_connect_timer = get_tree().create_timer(DIRECT_TIMEOUT if more else 10.0)
 	_connect_timer.timeout.connect(func():
 		if _peer == attempt and _peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
 			_on_connection_failed()
@@ -717,6 +774,10 @@ func _on_connected() -> void:
 
 func _on_connection_failed() -> void:
 	if mode != Mode.CLIENT:
+		return
+	if not _next_direct.is_empty():
+		var t: Array = _next_direct.pop_front()
+		_start_client(t[0], t[1], t[2])
 		return
 	if not _pending_relay.is_empty():
 		status.emit("Direct connection failed, trying the relay...")
@@ -924,6 +985,7 @@ func leave() -> void:
 	_mirrored.clear()
 	_remote_last.clear()
 	_offers.clear()
+	_next_direct.clear()
 	_sending.clear()
 	_receiving.clear()
 	_expect.clear()

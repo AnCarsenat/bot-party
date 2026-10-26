@@ -2,7 +2,7 @@
 """Bot Party server list + relay. Standard library only (Python 3.8+).
 
   HTTP  (TCP, default 8910): the server list
-     POST /api/host       {name, port, max, players, mode, lan_ip}  -> {id, token, ip, relay_port}
+     POST /api/host       {name, port, max, players, mode, lan_ip, ip6}  -> {id, token, ip, relay_port}
      POST /api/heartbeat  {id, token, players, mode}                -> {ok}
      POST /api/close      {id, token}                               -> {ok}
      GET  /api/servers                                              -> {you, relay_port, servers: [...]}
@@ -14,6 +14,7 @@ Open TCP 8910 and UDP 8911 on the VPS firewall.
 """
 import argparse
 import asyncio
+import ipaddress
 import json
 import logging
 import secrets
@@ -30,6 +31,15 @@ MAX_BODY = 4096
 MAX_CLIENTS_PER_SERVER = 16
 
 log = logging.getLogger("lobby")
+
+
+def clean_ip6(value):
+    """The host's public IPv6 address (clients try it first), or ""."""
+    try:
+        a = ipaddress.IPv6Address(str(value or ""))
+    except ValueError:
+        return ""
+    return str(a) if a.is_global else ""
 
 
 def clean_names(names):
@@ -61,7 +71,7 @@ class Lobby:
         if method == "GET" and path == "/api/servers":
             return {"you": ip, "relay_port": ARGS.relay_port, "servers": [
                 {"id": s.id, "name": s.info["name"], "ip": s.ip, "port": s.info["port"],
-                 "lan_ip": s.info.get("lan_ip", ""), "players": s.info["players"], "max": s.info["max"],
+                 "lan_ip": s.info.get("lan_ip", ""), "ip6": s.info.get("ip6", ""), "players": s.info["players"], "max": s.info["max"],
                  "mode": s.info.get("mode", ""), "names": s.info.get("names", []),
                  "relay": s.relay_addr is not None}
                 for s in self.servers.values()]}
@@ -77,6 +87,7 @@ class Lobby:
                 "players": max(0, min(8, int(body.get("players", 1)))),
                 "mode": str(body.get("mode", ""))[:12],
                 "lan_ip": str(body.get("lan_ip", ""))[:40],
+                "ip6": clean_ip6(body.get("ip6")),
                 "names": clean_names(body.get("names")),
             }
             sid = secrets.token_hex(4)          # 8 characters
