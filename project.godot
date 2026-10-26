@@ -19,12 +19,6 @@ config/icon="res://player/icon.png"
 
 buses/default_bus_layout="res://audio/default_bus_layout.tres"
 
-[bot_party]
-
-; Server list (and relay) the game uses unless a player types another one in
-; Online > List. Change it here (on GitHub too: edit project.godot) and rebuild.
-online/server_list="5.78.71.45"
-
 [autoload]
 
 Mods="*res://mods/mods.gd"
@@ -39,6 +33,10 @@ Net="*res://net/net.gd"
 Console="*res://ui/console.gd"
 Chat="*res://ui/chat.gd"
 CommandLine="*res://core/command_line.gd"
+
+[bot_party]
+
+online/server_list="5.78.71.45"
 
 [display]
 
@@ -361,7 +359,6 @@ p8_action_3={
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
-textures/vram_compression/import_etc2_astc=true
-
 rendering_device/driver.windows="d3d12"
+textures/vram_compression/import_etc2_astc=true
 environment/defaults/default_clear_color=Color(0.47, 0.47, 0.53, 1)

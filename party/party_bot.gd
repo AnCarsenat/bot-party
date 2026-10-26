@@ -101,7 +101,7 @@ const FAR := 1 << 30
 var _plan: Array = []      # per frame: [dir, jump held]
 var _commit := 0
 var _dangers: Array = []   # [Rect2 now, Vector2 velocity, trap that switches on and off or null,
-                           #  track or null, how it moves: [item, host, mount] or null]
+						   #  track or null, how it moves: [item, host, mount] or null]
 var _shooters: Array = []  # crossbows: [muzzle, bolt velocity, next shot in, interval, bolt flight time, size]
 var _dangers_age := 99
 var _reach: Array[Rect2] = []  # per danger: everywhere it can be while a plan runs
