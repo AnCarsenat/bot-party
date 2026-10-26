@@ -197,6 +197,10 @@ Things you can use:
   with `status` set to `stuck`, `slippery`, `slowed` or `floating`, and
   `seconds`. Or call `player.add_status("slippery", 2.0)` yourself.
   `player.pull(Vector2)` pulls a player for one frame (like the magnet).
+- Online, each computer moves its own players' robots (the host follows them),
+  so push, pull, bounce and give statuses only where `NetCheck.moves(player)` is
+  true: on the computer that moves that robot. `Hazard` and `StatusArea` do it
+  for you. Taking players out stays the host's job.
 - `Party.session` holds the round, scores and placed items.
 
 In a mod pack, your scenes can use your pictures like any Godot scene. In a mod

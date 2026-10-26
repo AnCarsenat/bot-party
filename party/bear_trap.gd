@@ -60,3 +60,4 @@ func net_state() -> Array:
 
 func net_apply(s: Array) -> void:
 	_closed = s[0]
+	_jaws.monitoring = _closed <= 0.0  # (it may have shut on our robot here first)

@@ -67,10 +67,10 @@ func _physics_process(delta: float) -> void:
 	_t += delta
 	if int(_t / PERIOD) == before:
 		return
-	# Punch!
-	if NetCheck.client(self):
-		return
+	# Punch! (Online: each computer punches the robots it moves.)
 	for p in _robots():
+		if not NetCheck.moves(p):
+			continue
 		p.bounce(punch_speed, 1.0, direction())
 
 

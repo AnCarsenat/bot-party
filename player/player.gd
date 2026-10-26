@@ -90,6 +90,9 @@ func _init() -> void:
 const HURTBOX_INSET := 6.0
 
 var _base_sprite_pos := Vector2.ZERO
+## Online: times the host put this robot somewhere itself (its client follows).
+var net_teleports := 0
+var _far_time := 0.0
 
 
 func _ready() -> void:
@@ -119,7 +122,8 @@ func net_state() -> Array:
 		can_process() and is_physics_processing(),
 		[gravity, speed, jump_speed, collision_mask & Layers.PLAYERS == 0],
 		# Which of its client's frames of buttons this position comes from.
-		_net().input_ack(get_meta("player_index", 0) + 1) if _net() else 0]
+		_net().input_ack(get_meta("player_index", 0) + 1) if _net() else 0,
+		net_teleports]
 
 
 func _net() -> Node:
@@ -155,11 +159,17 @@ func net_apply(s: Array) -> void:
 		jump_speed = s[12][2]
 		set_ghostly(s[12][3])
 	if predicted:
-		# Moving it ourselves (the host says when it can move at all).
+		# We move it (the host follows), and the host says when it can move at
+		# all. Only when the host put it somewhere itself do we go there.
 		var can_move: bool = (s[11] if s.size() > 11 else true) and not s[7]
 		set_physics_process(can_move)
 		_net_target = Vector2.INF
-		_correct(pos, int(s[13]) if s.size() > 13 else 0)
+		if s.size() > 14 and int(s[14]) > net_teleports:
+			net_teleports = int(s[14])
+			global_position = pos
+			velocity = Vector2.ZERO
+			_history.clear()
+			_nudge = Vector2.ZERO
 	else:
 		set_physics_process(false)
 		net_move(pos)
@@ -178,7 +188,7 @@ func net_apply(s: Array) -> void:
 		remove_from_group("camera_follow")  # made it: the camera keeps to the others
 	set_meta("coin", s[8])
 	modulate.a = s[9]
-	if s.size() > 10:
+	if s.size() > 10 and not predicted:
 		statuses.clear()
 		for k in s[10]:
 			statuses[k] = 1.0  # shown only: the host keeps the time
@@ -322,6 +332,10 @@ func _tick_statuses(delta: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	var net := _net()
+	if net and net.is_host() and net.remote_moves(get_meta("player_index", 0) + 1):
+		_follow_remote(net.remote_body(get_meta("player_index", 0) + 1), delta)
+		return
 	var predicted := NetCheck.client(self)  # (only our own robots move on a client)
 	if not predicted:
 		_tick_statuses(delta)  # a client shows the host's statuses
@@ -576,6 +590,55 @@ func _support_ok(other: Object, depth: int) -> bool:
 
 
 ## Push crates / logic blocks we walk into (sideways only).
+## Host: a robot its client moves. We follow where the client has it, through
+## our world (so it pushes crates and presses buttons here); if our world blocks
+## it, we go there anyway. A copy far off for half a second (lost, or a level
+## change) is put back where we have it: its client follows.
+func _follow_remote(b: Array, delta: float) -> void:
+	_tick_statuses(delta)
+	if b.size() < 5 or int(b[4]) != net_teleports:
+		velocity = Vector2.ZERO
+		_animate(delta)
+		return  # no news yet, or from before we moved it
+	var target := Vector2(b[0], b[1])
+	if global_position.distance_to(target) > 300.0:
+		_far_time += delta
+		if _far_time > 0.5:
+			_far_time = 0.0
+			net_teleports += 1
+		velocity = Vector2.ZERO
+		_animate(delta)
+		return
+	_far_time = 0.0
+	_prev_position = global_position
+	velocity = (target - global_position) / maxf(delta, 0.001)
+	# Pushing a crate there (where it's stuck until ours moves): we push it here
+	# at walking speed; the crate's moves reach the client, and its robot follows.
+	var pushing: bool = b.size() > 5 and b[5]
+	var dir := Input.get_axis(input_prefix + "_move_left", input_prefix + "_move_right")
+	if pushing and dir != 0.0:
+		velocity.x = dir * speed
+	elif dir != 0.0 and absf(velocity.x) < 30.0:
+		velocity.x += dir * 60.0  # leaning on something
+	move_and_slide()
+	_push_bodies()
+	_shove_machines()
+	if global_position.distance_to(target) > (90.0 if pushing else 24.0):
+		global_position = target
+	velocity = Vector2(b[2], b[3])
+	actual_velocity = velocity
+	_animate(delta)
+
+
+## Online client: our robot is pushing against a crate (which only moves on the host).
+func pushing_something() -> bool:
+	for i in get_slide_collision_count():
+		var c := get_slide_collision(i)
+		if c.get_collider() is RigidBody2D and absf(c.get_normal().x) > 0.5:
+			return true
+	return false
+
+
 func _push_bodies() -> void:
 	for i in get_slide_collision_count():
 		var c := get_slide_collision(i)

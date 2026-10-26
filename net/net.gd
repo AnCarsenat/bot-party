@@ -1078,6 +1078,8 @@ func leave() -> void:
 	_offers.clear()
 	_next_direct.clear()
 	_input_queue.clear()
+	_remote_body.clear()
+	_body_seq.clear()
 	_ack_recv.clear()
 	_ack_used.clear()
 	_ack_snap.clear()
@@ -1250,6 +1252,8 @@ func _physics_process(_d: float) -> void:
 
 ## Client: the number of the current physics frame's buttons.
 var input_seq := 0
+var _remote_body := {}   # host: slot -> [x, y, vx, vy, teleports] where its client has it
+var _body_seq := {}      # host: slot -> seq that body is from
 var _sent_inputs := {}   # client: slot -> [[seq, buttons], ...] of the last frames
 var _input_queue := {}   # host: slot -> [[seq, buttons], ...] not played yet
 var _ack_recv := {}      # host: slot -> highest seq queued
@@ -1271,11 +1275,18 @@ func _send_inputs() -> void:
 		var flat := []
 		for r in recent:
 			flat.append_array(r)
-		_remote_input.rpc_id(1, slot, flat)
+		# Where our robot is: we move it, the host follows.
+		var body := []
+		var scene := get_tree().current_scene
+		var p := scene.get_node_or_null("Player%d" % slot) if scene else null
+		if p and p.is_physics_processing() and not p.get_meta("eliminated", false):
+			body = [p.global_position.x, p.global_position.y, p.velocity.x, p.velocity.y, int(p.net_teleports),
+				p.pushing_something()]
+		_remote_input.rpc_id(1, slot, flat, body)
 
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
-func _remote_input(slot: int, frames: Array) -> void:
+func _remote_input(slot: int, frames: Array, body := []) -> void:
 	if not is_host():
 		return
 	var sender := multiplayer.get_remote_sender_id()
@@ -1295,6 +1306,25 @@ func _remote_input(slot: int, frames: Array) -> void:
 			_ack_recv[slot] = seq
 			q.append([seq, frames[i + 1]])
 	_input_queue[slot] = q
+	var newest := int(frames[frames.size() - 2]) if frames.size() >= 2 else 0
+	if newest >= int(_body_seq.get(slot, 0)):
+		_body_seq[slot] = newest
+		_remote_body[slot] = body
+
+
+## Host: `slot` is played on a client, which moves its robot.
+func remote_moves(slot: int) -> bool:
+	if not is_host():
+		return false
+	for r in roster:
+		if int(r.slot) == slot:
+			return int(r.peer) != 1
+	return false
+
+
+## Host: where `slot`'s client has its robot: [x, y, vx, vy, teleports seen], or [].
+func remote_body(slot: int) -> Array:
+	return _remote_body.get(slot, [])
 
 
 ## Host, each physics frame: every remote robot plays its next frame of buttons.

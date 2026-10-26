@@ -33,6 +33,19 @@ static func lead(node: Node) -> float:
 	return n.round_trip_ms() / 2000.0 if n != null and n.is_client() else 0.0
 
 
+## This computer moves `body` (a robot): offline, always; online, each computer
+## moves its own players' robots (like most online games), and the host the
+## rest (its own, bots). Pushes, pulls and statuses go to that computer's copy.
+static func moves(body: Node) -> bool:
+	var n := _net(body)
+	if n == null or not n.is_online():
+		return true
+	var slot: int = body.get_meta("player_index", 0) + 1
+	if n.is_client():
+		return n.my_slots().has(slot)
+	return not n.remote_moves(slot)
+
+
 ## A client is applying something the host sent (gameplay code may run).
 static func applying(node: Node) -> bool:
 	var n := _net(node)

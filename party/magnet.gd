@@ -13,14 +13,14 @@ var _t := 0.0
 
 func _physics_process(delta: float) -> void:
 	_t += delta
-	if NetCheck.client(self):
-		return
 	var ctl = get_tree().get_first_node_in_group("party_controller")
 	if ctl == null or ctl.phase != ctl.Phase.RUN:
 		return
 	for p in get_tree().get_nodes_in_group("players"):
 		if p.get_meta("eliminated", false) or p.get_meta("finished", false) or not p.has_method("pull"):
 			continue
+		if not NetCheck.moves(p):
+			continue  # online: the computer that moves that robot pulls it
 		var to: Vector2 = global_position - p.global_position
 		var d := to.length()
 		if d < reach and d > 1.0:

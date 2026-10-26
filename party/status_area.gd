@@ -20,8 +20,9 @@ func _ready() -> void:
 	body_entered.connect(_on_body)
 
 
+## (Online: the computer that moves a robot gives it its statuses.)
 func _on_body(body: Node) -> void:
-	if NetCheck.client(self) or not monitoring:
+	if not monitoring or not NetCheck.moves(body):
 		return
 	if body.has_method("add_status") and not body.get_meta("eliminated", false):
 		body.add_status(status, seconds)
@@ -29,10 +30,10 @@ func _on_body(body: Node) -> void:
 
 
 func _physics_process(_d: float) -> void:
-	if not refresh or not monitoring or NetCheck.client(self):
+	if not refresh or not monitoring:
 		return
 	for b in get_overlapping_bodies():
-		if b.has_method("add_status"):
+		if b.has_method("add_status") and NetCheck.moves(b):
 			b.add_status(status, seconds)
 
 
