@@ -163,7 +163,49 @@ func cosmetics() -> Dictionary:
 
 
 var _look_textures := {}
+var _icons := {}          # icon file or repository -> texture
 ## A cosmetic's picture (loaded once).
+## A mod's icon (mod.json "icon"), or null.
+func icon_texture(m: Dictionary) -> Texture2D:
+	var file: String = m.get("icon", "")
+	if file == "":
+		return null
+	if not _icons.has(file):
+		_icons[file] = texture(file)
+	return _icons[file]
+
+
+## Mods > Explore: the icon of a repository's mod (its mod.json "icon", or
+## icon.png), downloaded once. `done` gets the texture, or null.
+func repo_icon(full_name: String, done: Callable) -> void:
+	if _icons.has(full_name):
+		done.call(_icons[full_name])
+		return
+	var raw := "https://raw.githubusercontent.com/%s/HEAD/" % full_name
+	_http_raw(raw + "mod.json", func(body: PackedByteArray):
+		var data = JSON.parse_string(body.get_string_from_utf8()) if body.size() > 0 else null
+		var file := str(data.get("icon", "icon.png")) if data is Dictionary else "icon.png"
+		_http_raw(raw + file.uri_encode().replace("%2F", "/"), func(png: PackedByteArray):
+			var img := Image.new()
+			var tex: Texture2D = null
+			if png.size() > 0 and png.size() < 2_000_000 and img.load_png_from_buffer(png) == OK:
+				tex = ImageTexture.create_from_image(img)
+			_icons[full_name] = tex
+			done.call(tex)))
+
+
+func _http_raw(url: String, done: Callable) -> void:
+	var req := HTTPRequest.new()
+	req.timeout = 15.0
+	add_child(req)
+	req.request_completed.connect(func(result: int, code: int, _h, body: PackedByteArray):
+		req.queue_free()
+		done.call(body if result == HTTPRequest.RESULT_SUCCESS and code == 200 else PackedByteArray()))
+	if req.request(url, ["User-Agent: BotParty"]) != OK:
+		req.queue_free()
+		done.call(PackedByteArray())
+
+
 func look_texture(id: String) -> Texture2D:
 	if not _look_textures.has(id):
 		var d: Dictionary = cosmetics().get(id, {})
@@ -427,6 +469,12 @@ func _read(path: String) -> Dictionary:
 	for k in ["name", "author", "version", "description"]:
 		if data.has(k):
 			m[k] = str(data[k])
+	# Its picture in the Mods screens: "icon" (or icon.png if there's one).
+	var icon := _file(m, str(data.get("icon", "icon.png")))
+	if _exists(icon):
+		m.icon = icon
+	elif data.has("icon"):
+		m.problems.append("Missing file %s" % data.icon)
 	var maps := path.path_join(str(data.get("maps", "maps")))
 	if DirAccess.dir_exists_absolute(maps):
 		m.maps = maps
@@ -551,7 +599,7 @@ func _apply_textures(m: Dictionary) -> void:
 
 ## A blank mod entry.
 func _entry(id: String, name: String) -> Dictionary:
-	return {"id": id, "name": name, "author": "", "version": "1", "description": "", "path": "",
+	return {"id": id, "name": name, "author": "", "version": "1", "description": "", "path": "", "icon": "",
 		"kind": "folder", "enabled": true, "items": {}, "modes": {}, "cosmetics": {}, "textures": {}, "maps": "", "problems": []}
 
 

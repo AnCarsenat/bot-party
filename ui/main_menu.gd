@@ -422,10 +422,13 @@ func _show(screen: String, keep_index := false) -> void:
 				_items.append({"text": "Installed", "enabled": false, "size": 26, "heading": true})
 			for m in Mods.mods:
 				var mod: Dictionary = m
-				_items.append({"text": mod.name.left(16), "size": 34,
+				var mod_item := {"text": mod.name.left(16), "size": 34,
 					"value": func(): return "On" if mod.enabled else "Off",
 					"on_accept": func(): _toggle_mod(mod), "on_left": func(): _toggle_mod(mod), "on_right": func(): _toggle_mod(mod),
-					"info": _mod_info(mod)})
+					"info": _mod_info(mod)}
+				if Mods.icon_texture(mod):
+					mod_item.icon = Mods.icon_texture(mod)
+				_items.append(mod_item)
 			_items.append({"text": "Open mods folder", "on_accept": func(): Mods.open_folder(),
 				"info": "Put mod packs (.pck) or mod folders here:\n%s\nThen come back to this screen." % ProjectSettings.globalize_path(Mods.DIR)})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
@@ -450,7 +453,7 @@ func _show(screen: String, keep_index := false) -> void:
 						repo.description.left(160), repo.author, repo.stars, "" if repo.stars == 1 else "s",
 						("  ·  %d downloads" % repo.downloads) if int(repo.get("downloads", -1)) >= 0 else "",
 						repo.get("updated", ""), "\n(installed)" if installed else ""],
-					"on_accept": func(): _install_repo(repo)})
+					"repo": repo.full_name, "on_accept": func(): _install_repo(repo)})
 			_items.append({"text": "Refresh", "on_accept": func(): _explore()})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"looks":
@@ -547,8 +550,14 @@ func _refresh_info() -> void:
 		_info.text = _items[_index].get("info", "")
 		if _items[_index].has("icon"):
 			_machine.texture = _items[_index].icon
-		elif _screen == "party_items":
-			_machine.texture = MACHINES.party
+		else:
+			_machine.texture = MACHINES.get(_screen, MACHINES.party if _screen == "party_items" else MACHINES.main)
+		if _items[_index].has("repo"):
+			# Mods > Explore: the mod's icon, once downloaded.
+			var repo: String = _items[_index].repo
+			Mods.repo_icon(repo, func(t: Texture2D):
+				if t and is_inside_tree() and _index < _items.size() and _items[_index].get("repo", "") == repo:
+					_machine.texture = t)
 	for r in _rows:
 		r.queue_redraw()
 	# Scroll so the selected option stays in view.

@@ -100,6 +100,7 @@ that mod), the folder wins: the pack would hide your latest changes.
   "author": "You",
   "version": "1.0",
   "description": "One line shown in the Mods screen.",
+  "icon": "icon.png",
 
   "items": {
     "rocket": {
@@ -123,6 +124,11 @@ that mod), the folder wins: the pack would hide your latest changes.
 ```
 
 Every key is optional except `name`.
+
+`icon` is a picture shown in **Mods** and **Mods > Explore** when your mod is
+selected: square, pixel art looks best (32x32 or 64x64, drawn big without
+smoothing). Without the key, a file called `icon.png` is used if there's one.
+Explore reads it from your repository (`mod.json`'s `icon`, or `icon.png`).
 
 ### Items
 
