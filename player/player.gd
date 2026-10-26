@@ -117,7 +117,13 @@ func net_state() -> Array:
 		# Can it move (a finished robot is switched off as a whole), and how it
 		# moves (surprise rules; party robots go through each other).
 		can_process() and is_physics_processing(),
-		[gravity, speed, jump_speed, collision_mask & Layers.PLAYERS == 0]]
+		[gravity, speed, jump_speed, collision_mask & Layers.PLAYERS == 0],
+		# Which of its client's frames of buttons this position comes from.
+		_net().input_ack(get_meta("player_index", 0) + 1) if _net() else 0]
+
+
+func _net() -> Node:
+	return get_tree().root.get_node_or_null("Net") if is_inside_tree() else null
 
 
 ## Online client: is this one of our own robots (moved here, not by the host)?
@@ -153,7 +159,7 @@ func net_apply(s: Array) -> void:
 		var can_move: bool = (s[11] if s.size() > 11 else true) and not s[7]
 		set_physics_process(can_move)
 		_net_target = Vector2.INF
-		_correct(pos)
+		_correct(pos, int(s[13]) if s.size() > 13 else 0)
 	else:
 		set_physics_process(false)
 		net_move(pos)
@@ -219,11 +225,19 @@ func _process(delta: float) -> void:
 ## Predicted robot: where the host has it is where we were about one round
 ## trip ago; if that's off, the difference is made up over a few frames (at
 ## once when far: a respawn or a teleport).
-func _correct(host_pos: Vector2) -> void:
+func _correct(host_pos: Vector2, ack := 0) -> void:
 	var net := get_tree().root.get_node("Net")
 	var then: float = Time.get_ticks_msec() - net.round_trip_ms() - 20
 	var was := global_position
-	for i in _history.size():
+	# Best: the host says which of our frames this is from (exact).
+	var exact := false
+	if ack > 0:
+		for h in _history:
+			if h.size() > 2 and int(h[2]) == ack:
+				was = h[1]
+				exact = true
+				break
+	for i in (0 if exact else _history.size()):
 		if _history[i][0] > then:
 			if i > 0:
 				# Between the two samples around that moment.
@@ -244,7 +258,8 @@ func _correct(host_pos: Vector2) -> void:
 
 func _record_history() -> void:
 	var now := Time.get_ticks_msec()
-	_history.append([now, global_position])
+	var net := _net()
+	_history.append([now, global_position, net.input_seq if net else 0])
 	while not _history.is_empty() and now - _history[0][0] > 1000:
 		_history.pop_front()
 

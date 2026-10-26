@@ -35,8 +35,11 @@ const FULL_EVERY := 60
 const DIRECT_TIMEOUT := 3.0
 ## A change in a snapshot is sent again in this many following ones (lost packets).
 const RESEND := 3
-## Copies of a change in a client's buttons, in the following physics frames.
+## Frames of buttons in each of a client's input packets (the latest and the ones before).
 const INPUT_COPIES := 4
+## The host plays a client's buttons one frame at a time; more than this many
+## waiting and it catches up.
+const INPUT_BUFFER := 2
 const CONFIG_PATH := "user://online.cfg"
 
 var mode := Mode.OFFLINE
@@ -1074,6 +1077,12 @@ func leave() -> void:
 	_remote_last.clear()
 	_offers.clear()
 	_next_direct.clear()
+	_input_queue.clear()
+	_ack_recv.clear()
+	_ack_used.clear()
+	_ack_snap.clear()
+	_sent_inputs.clear()
+	input_seq = 0
 	if _upnp:
 		_close_router(_upnp, hosted_port)
 		_upnp = null
@@ -1219,6 +1228,7 @@ func _physics_process(_d: float) -> void:
 		_send_inputs()
 	elif is_host():
 		_frame += 1
+		_play_inputs()
 		if multiplayer.get_peers().size() > 0:
 			if _frame % SNAPSHOT_EVERY == 0 or _full_next:
 				_send_snapshot(_frame % FULL_EVERY == 0 or _full_next)
@@ -1230,31 +1240,42 @@ func _physics_process(_d: float) -> void:
 			_send_mod_chunks()
 
 
-## Client: our players' buttons -> host. Sent when they change, then again in
-## the next few physics frames: these packets aren't resent when lost (resending
-## takes a round trip or more), so a copy gets through instead, and nothing
-## waits for a lost one. Every 10 frames anyway, in case.
-var _input_repeat := {}  # slot -> copies still to send
+# --- A client's buttons -----------------------------------------------------------
+# Every physics frame the client sends its players' buttons, numbered (input_seq),
+# along with the last few frames' (a lost packet costs nothing: the next one has
+# them). The host plays them one physics frame each, in order, like the client
+# did, and tells the client which frame each robot's position is from (ack): the
+# client compares with where its own robot was after that very frame, so it only
+# corrects real differences, not delays.
+
+## Client: the number of the current physics frame's buttons.
+var input_seq := 0
+var _sent_inputs := {}   # client: slot -> [[seq, buttons], ...] of the last frames
+var _input_queue := {}   # host: slot -> [[seq, buttons], ...] not played yet
+var _ack_recv := {}      # host: slot -> highest seq queued
+var _ack_used := {}      # host: slot -> seq of the buttons being played now
+var _ack_snap := {}      # host: slot -> seq the positions being sent come from
+
+
 func _send_inputs() -> void:
+	input_seq += 1
 	for slot in my_slots():
 		var local: int = my_slots()[slot]
 		var v := _keyboard(local)
-		var send := false
-		if _last_input.get(slot) != v:
-			_last_input[slot] = v
-			_input_repeat[slot] = INPUT_COPIES
-			send = true
-		elif int(_input_repeat.get(slot, 0)) > 0:
-			_input_repeat[slot] = int(_input_repeat[slot]) - 1
-			send = true
-		elif Engine.get_physics_frames() % 10 == 0:
-			send = true
-		if send:
-			_remote_input.rpc_id(1, slot, v)
+		_last_input[slot] = v
+		var recent: Array = _sent_inputs.get(slot, [])
+		recent.append([input_seq, v])
+		if recent.size() > INPUT_COPIES:
+			recent.pop_front()
+		_sent_inputs[slot] = recent
+		var flat := []
+		for r in recent:
+			flat.append_array(r)
+		_remote_input.rpc_id(1, slot, flat)
 
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
-func _remote_input(slot: int, v: PackedByteArray) -> void:
+func _remote_input(slot: int, frames: Array) -> void:
 	if not is_host():
 		return
 	var sender := multiplayer.get_remote_sender_id()
@@ -1264,8 +1285,39 @@ func _remote_input(slot: int, v: PackedByteArray) -> void:
 			owned = true
 	if not owned:
 		return
-	_remote_last[slot] = v
-	_apply_input(slot, v)
+	var q: Array = _input_queue.get(slot, [])
+	if frames.size() >= 2 and int(frames[frames.size() - 2]) < int(_ack_recv.get(slot, 0)) - 600:
+		_ack_recv.erase(slot)  # a new client in that place (its count starts again)
+		q.clear()
+	for i in range(0, frames.size() - 1, 2):
+		var seq := int(frames[i])
+		if seq > int(_ack_recv.get(slot, 0)) and frames[i + 1] is PackedByteArray:
+			_ack_recv[slot] = seq
+			q.append([seq, frames[i + 1]])
+	_input_queue[slot] = q
+
+
+## Host, each physics frame: every remote robot plays its next frame of buttons.
+## If too many wait (the network sped up), it catches up; if none came, the last
+## ones go on.
+func _play_inputs() -> void:
+	_ack_snap = _ack_used.duplicate()
+	for slot in _input_queue:
+		var q: Array = _input_queue[slot]
+		if q.is_empty():
+			continue
+		while q.size() > INPUT_BUFFER:
+			var skipped: Array = q.pop_front()
+			_apply_input(slot, skipped[1])  # (still pressed for a frame: taps count)
+		var f: Array = q.pop_front()
+		_ack_used[slot] = int(f[0])
+		_remote_last[slot] = f[1]
+		_apply_input(slot, f[1])
+
+
+## Host: which of the client's frames `slot`'s robot position comes from (0: none).
+func input_ack(slot: int) -> int:
+	return int(_ack_snap.get(slot, 0))
 
 
 ## Host: the players' positions every frame in between snapshots (the robots
