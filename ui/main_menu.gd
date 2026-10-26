@@ -71,6 +71,12 @@ func _ready() -> void:
 		if _screen == "controls" and _capture == "":
 			_show("controls", true)
 		_lobby.queue_redraw())
+	# Mod updates: looked for in the background (at most every 10 minutes).
+	Mods.updates_changed.connect(func():
+		if is_inside_tree() and _screen in ["main", "mods"]:
+			_show(_screen, true))
+	if not Net.is_online():
+		Mods.check_updates()
 	Net.mods_offered.connect(func(list):
 		if is_inside_tree():
 			_mods_offer = list
@@ -204,7 +210,7 @@ func _show(screen: String, keep_index := false) -> void:
 				{"text": "Party", "on_accept": func(): _show("party"), "info": "Place traps. Reach the flag."},
 				{"text": "Online", "on_accept": func(): _show("online"), "info": "Play with friends on other computers."},
 				{"text": "Players", "on_accept": func(): _show("players")},
-				{"text": "Mods", "on_accept": func(): _show("mods"), "info": "Items, maps, game modes, hats and textures made by players.",
+				{"text": "Mods", "on_accept": func(): _show("mods"), "info": "Items, maps, game modes, hats and textures made by players." + _mods_news(),
 					"enabled": not Net.is_online()},
 				{"text": "Settings", "on_accept": func(): _show("settings")},
 			]
@@ -426,18 +432,26 @@ func _show(screen: String, keep_index := false) -> void:
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"mods":
 			Mods.scan()
+			if Mods.needs_restart:
+				_items.append({"text": "Restart now", "on_accept": func(): Mods.restart(),
+					"info": "Some changes show only after a restart (updated mods, textures). The game starts again by itself."})
+			if not Mods.updates.is_empty():
+				var names: Array = Mods.updates.values().map(func(u): return "%s %s -> %s" % [u.name, u.have, u.version])
+				_items.append({"text": "Update (%d)" % Mods.updates.size(), "on_accept": func(): _update_mods(),
+					"info": "New versions on GitHub:\n%s\n\nJump: download them (they're put in place when the game restarts)." % "\n".join(names)})
 			_items.append({"text": "Explore", "on_accept": func(): _explore(),
 				"info": "Mods shared on GitHub (repositories tagged \"%s\"): pick one to install it." % Mods.TOPIC})
 			_items.append({"text": "Browse...", "on_accept": func(): _browse_pack(),
 				"info": "Install a mod pack (.pck) from your computer."})
-			_items.append({"text": "Looks", "on_accept": func(): _show("looks"),
-				"info": "Hats and other cosmetics from mods: who wears what."})
+			if not Mods.cosmetics().is_empty():
+				_items.append({"text": "Looks", "on_accept": func(): _show("looks"),
+					"info": "Hats and other cosmetics from mods: who wears what."})
 			if not Mods.mods.is_empty():
 				_items.append({"text": "Installed", "enabled": false, "size": 26, "heading": true})
 			for m in Mods.mods:
 				var mod: Dictionary = m
 				var mod_item := {"text": mod.name.left(16), "size": 34,
-					"value": func(): return "On" if mod.enabled else "Off",
+					"value": func(): return ("On" if mod.enabled else "Off") + ("  (update)" if Mods.updates.has(mod.id) else ""),
 					"on_accept": func(): _toggle_mod(mod), "on_left": func(): _toggle_mod(mod), "on_right": func(): _toggle_mod(mod),
 					"info": _mod_info(mod)}
 				if Mods.icon_texture(mod):
@@ -446,6 +460,11 @@ func _show(screen: String, keep_index := false) -> void:
 			_items.append({"text": "Open mods folder", "on_accept": func(): Mods.open_folder(),
 				"info": "Put mod packs (.pck) or mod folders here:\n%s\nThen come back to this screen." % ProjectSettings.globalize_path(Mods.DIR)})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
+		"restart":
+			_items.append({"text": "Restart now", "on_accept": func(): Mods.restart(),
+				"info": "The game closes and starts again by itself (your party and settings are kept)."})
+			_items.append({"text": "Later", "on_accept": func(): _show("mods"),
+				"info": "The changes show the next time you start the game. Mods has a Restart now button meanwhile."})
 		"mods_explore":
 			_items.append({"text": "Search: " + (_explore_search.left(14) if _explore_search != "" else "all"), "size": 34,
 				"info": "Words to look for in the mods' names and descriptions.\nJump: type them (empty: all).",
@@ -497,7 +516,7 @@ func _show(screen: String, keep_index := false) -> void:
 					_items.append(item)
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 	_heading.text = {"main": "", "campaign": _campaign_heading(), "party": "Party", "party_items": "Party items", "party_rules": "Party rules", "players": "Players",
-		"settings": "Settings", "controls": "Controls", "mods": "Mods", "mods_explore": "Explore mods", "looks": "Looks", "online": "Online", "servers": "Server list", "online_lobby": _online_heading(),
+		"settings": "Settings", "controls": "Controls", "mods": "Mods", "restart": "Restart the game?", "mods_explore": "Explore mods", "looks": "Looks", "online": "Online", "servers": "Server list", "online_lobby": _online_heading(),
 		"kick": "Kick or ban %s" % str(Net.computers.get(_kick_peer, "?")), "mods_offer": "Mods for this game"}[screen]
 	if not keep_index:
 		_index = 0
@@ -908,19 +927,56 @@ func _explore() -> void:
 
 func _install_repo(repo: Dictionary) -> void:
 	_hint.text = "Downloading %s..." % repo.name
+	var restart_before: bool = Mods.needs_restart
 	Mods.install_from_repo(repo.full_name, func(err: String):
 		if not is_inside_tree():
 			return
-		_hint.text = err if err != "" else "%s is installed and on" % repo.name
+		if err == "" and Mods.needs_restart and not restart_before:
+			_ask_restart("%s is downloaded. The version you have is loaded: the new one comes in when the game restarts." % repo.name)
+			return
+		_hint.text = err if err != "" else "%s is installed and on: no restart needed" % repo.name
 		if _screen == "mods_explore":
 			_show("mods_explore", true))
+
+
+func _update_mods() -> void:
+	_hint.text = "Downloading the updates..."
+	Mods.update_all(func(err: String):
+		if not is_inside_tree():
+			return
+		if Mods.needs_restart:
+			_ask_restart("The updates are downloaded. They come in when the game restarts." + ("\n" + err if err != "" else ""))
+		else:
+			_hint.text = err
+			_show("mods", true))
+
+
+## Main menu: mod updates waiting, a restart to do.
+func _mods_news() -> String:
+	var out := ""
+	if not Mods.updates.is_empty():
+		out += "\n\n%d mod update%s available." % [Mods.updates.size(), "" if Mods.updates.size() == 1 else "s"]
+	if Mods.needs_restart:
+		out += "\n\nRestart the game to finish installing mods."
+	return out
+
+
+## Asks whether to restart now (some mod changes only show after a restart).
+func _ask_restart(why: String) -> void:
+	_show("restart")
+	_info.text = why + "\n\n" + str(_items[0].info)
+	_hint.text = ""
 
 
 ## Mods > Browse: pick a mod pack on this computer.
 func _browse_pack() -> void:
 	var done := func(path: String):
+		var restart_before: bool = Mods.needs_restart
 		var err: String = Mods.install_pack(path)
-		_hint.text = err if err != "" else "%s is installed and on" % path.get_file()
+		if err == "" and Mods.needs_restart and not restart_before:
+			_ask_restart("%s is copied. The version you have is loaded: the new one comes in when the game restarts." % path.get_file())
+			return
+		_hint.text = err if err != "" else "%s is installed and on: no restart needed" % path.get_file()
 		_show("mods", true)
 	if DisplayServer.has_feature(DisplayServer.FEATURE_NATIVE_DIALOG_FILE):
 		DisplayServer.file_dialog_show("Install a mod pack", OS.get_system_dir(OS.SYSTEM_DIR_DOWNLOADS), "", false,
@@ -943,7 +999,11 @@ func _browse_pack() -> void:
 
 func _toggle_mod(mod: Dictionary) -> void:
 	var count: int = Mods.mods.size()
+	var restart_before: bool = Mods.needs_restart
 	Mods.set_enabled(mod.id, not mod.enabled)
+	if Mods.needs_restart and not restart_before:
+		_ask_restart("%s changes the game's pictures: that shows after a restart." % mod.name)
+		return
 	if Mods.get_mod(mod.id) != mod or Mods.mods.size() != count:
 		_show("mods", true)  # a mod pack was loaded: the list was read again
 		return
@@ -1078,6 +1138,9 @@ func _back() -> void:
 	if _screen == "servers":
 		_show("online")
 		_select(2)
+		return
+	if _screen == "restart":
+		_show("mods")
 		return
 	if _screen in ["party_items", "party_rules", "controls", "mods_explore", "looks"]:
 		var text: String = {"party_items": "Items", "party_rules": "Rules", "controls": "Controls", "mods_explore": "Explore", "looks": "Looks"}[_screen]

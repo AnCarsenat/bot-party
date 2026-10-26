@@ -31,7 +31,20 @@ const NET_DIR := "user://mods_net"
 const CACHE_DIR := "user://mods_cache"
 
 
+## Updated packs wait here until the game restarts (a pack can't be replaced
+## while it's loaded): they take their place at the next start.
+const UPDATE_DIR := "user://mods_update"
+
+## Something changed that only shows after a restart (updated packs, textures).
+var needs_restart := false
+## Mods with a newer release on GitHub: id -> {name, repo, have, version, url, file}.
+var updates := {}
+signal updates_changed
+var _checked_at := -1000000
+
+
 func _init() -> void:
+	_apply_updates()
 	var cfg := ConfigFile.new()
 	cfg.load(CFG)
 	for file in _pack_files():
@@ -115,6 +128,8 @@ func set_enabled(id: String, on: bool) -> void:
 	var rescan := false
 	for m in mods:
 		if m.id == id:
+			if not m.get("textures", {}).is_empty() and m.enabled != on:
+				needs_restart = true  # textures are swapped when the game starts
 			if on and m.kind == "pack" and not _mounted.has(m.pack) and not _shadowed(m.pack):
 				_mount(m.pack)  # loaded now; it stays loaded until the game restarts
 				rescan = true
@@ -302,7 +317,8 @@ func set_net_on(on: bool) -> void:
 
 ## GitHub repositories with this topic are listed in Mods > Explore.
 const TOPIC := "bot-party-mod"
-const API := "https://api.github.com"
+## GitHub's API (a test can point it elsewhere).
+var api := "https://api.github.com"
 
 
 ## Copies a mod pack (.pck / .zip) into the mods folder and loads it. Returns an
@@ -313,10 +329,152 @@ func install_pack(from: String) -> String:
 		return "Choose a mod pack (.pck or .zip)"
 	DirAccess.make_dir_recursive_absolute(DIR)
 	var to := DIR.path_join(from.get_file())
+	if _mounted.has(to):
+		# That pack is loaded: the new one takes its place at the next start.
+		DirAccess.make_dir_recursive_absolute(UPDATE_DIR)
+		if DirAccess.copy_absolute(from, UPDATE_DIR.path_join(to.get_file())) != OK:
+			return "Couldn't copy it into the mods folder"
+		needs_restart = true
+		return ""
 	if ProjectSettings.globalize_path(to) != ProjectSettings.globalize_path(from):
 		if DirAccess.copy_absolute(from, to) != OK:
 			return "Couldn't copy it into the mods folder"
 	return _load_installed(to)
+
+
+## The game starts again (same arguments), to finish what needs_restart says.
+func restart() -> void:
+	OS.set_restart_on_exit(true, OS.get_cmdline_args())
+	get_tree().quit()
+
+
+## At start, before any pack is loaded: downloaded updates replace the old packs.
+func _apply_updates() -> void:
+	if not DirAccess.dir_exists_absolute(UPDATE_DIR):
+		return
+	DirAccess.make_dir_recursive_absolute(DIR)
+	for f in DirAccess.get_files_at(UPDATE_DIR):
+		var to := DIR.path_join(f)
+		DirAccess.remove_absolute(to)
+		if DirAccess.rename_absolute(UPDATE_DIR.path_join(f), to) != OK:
+			push_warning("Mods: couldn't put the update %s in place" % f)
+
+
+## Where GitHub mods came from (Mods > Explore), to look for their updates.
+func _remember_source(file: String, repo: String) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(CFG)
+	cfg.set_value("source", _pack_id(file), repo)
+	cfg.save(CFG)
+
+
+## "1.10" > "1.9", "v2.0" > "1.1".
+static func newer(a: String, b: String) -> bool:
+	var pa := a.trim_prefix("v").split(".")
+	var pb := b.trim_prefix("v").split(".")
+	for i in maxi(pa.size(), pb.size()):
+		var x := int(pa[i]) if i < pa.size() else 0
+		var y := int(pb[i]) if i < pb.size() else 0
+		if x != y:
+			return x > y
+	return false
+
+
+## Looks for newer releases of the mod packs installed from GitHub (at most every
+## 10 minutes; GitHub limits how often we may ask). Mods installed before the
+## game remembered where they came from are found by name among the tagged
+## repositories. `done` (optional) gets the number of updates.
+func check_updates(done := Callable(), force := false) -> void:
+	var now := Time.get_ticks_msec()
+	if not force and now - _checked_at < 600000:
+		if done.is_valid():
+			done.call(updates.size())
+		return
+	_checked_at = now
+	var cfg := ConfigFile.new()
+	cfg.load(CFG)
+	var packs: Array = mods.filter(func(m): return m.kind == "pack" and not m.get("net", false) and m.has("pack"))
+	if packs.is_empty():
+		if done.is_valid():
+			done.call(0)
+		return
+	explore(func(list: Array, _err: String):
+		var todo := []  # [mod, repo]
+		for m in packs:
+			var repo := str(cfg.get_value("source", m.id, ""))
+			if repo == "":
+				for r in list:
+					if ArenaMap.slug(r.name) == m.id or ArenaMap.slug(str(r.full_name).get_file()) in [m.id, "bot-party-" + m.id]:
+						repo = r.full_name
+			if repo != "":
+				todo.append([m, repo])
+		_check_next(todo, 0, done))
+
+
+func _check_next(todo: Array, i: int, done: Callable) -> void:
+	if i >= todo.size():
+		updates_changed.emit()
+		if done.is_valid():
+			done.call(updates.size())
+		return
+	var m: Dictionary = todo[i][0]
+	var repo: String = todo[i][1]
+	_http_get(api + "/repos/%s/releases/latest" % repo, func(ok: bool, data):
+		if ok and data is Dictionary:
+			var tag := str(data.get("tag_name", ""))
+			var asset = _pack_asset(data)
+			if asset != null and newer(tag, str(m.version)):
+				updates[m.id] = {"name": m.name, "repo": repo, "have": str(m.version), "version": tag.trim_prefix("v"),
+					"url": str(asset.browser_download_url), "file": m.pack.get_file()}
+			else:
+				updates.erase(m.id)
+		_check_next(todo, i + 1, done))
+
+
+func _pack_asset(release: Dictionary):
+	for a in release.get("assets", []):
+		if str(a.get("name", "")).get_extension().to_lower() in ["pck", "zip"]:
+			return a
+	return null
+
+
+## Downloads every update; they're put in place when the game restarts.
+## `done` gets an error message, or "".
+func update_all(done: Callable) -> void:
+	_update_next(updates.keys(), 0, "", done)
+
+
+func _update_next(ids: Array, i: int, err: String, done: Callable) -> void:
+	if i >= ids.size():
+		done.call(err)
+		return
+	var u: Dictionary = updates[ids[i]]
+	_download(u.url, UPDATE_DIR.path_join(u.file), func(ok: bool):
+		if ok:
+			needs_restart = true
+			updates.erase(ids[i])
+			updates_changed.emit()
+		_update_next(ids, i + 1, err if ok else "Couldn't download %s" % u.name, done))
+
+
+func _download(url: String, to: String, done: Callable) -> void:
+	DirAccess.make_dir_recursive_absolute(to.get_base_dir())
+	var part := to + ".part"
+	var req := HTTPRequest.new()
+	req.download_file = part
+	req.timeout = 120.0
+	add_child(req)
+	req.request_completed.connect(func(result: int, code: int, _h, _b):
+		req.queue_free()
+		var ok := result == HTTPRequest.RESULT_SUCCESS and code == 200
+		if ok:
+			DirAccess.remove_absolute(to)
+			ok = DirAccess.rename_absolute(part, to) == OK
+		DirAccess.remove_absolute(part)
+		done.call(ok))
+	if req.request(url, ["User-Agent: BotParty", "Accept: application/octet-stream"]) != OK:
+		req.queue_free()
+		done.call(false)
 
 
 func _load_installed(file: String) -> String:
@@ -349,7 +507,7 @@ func explore(done: Callable, search := "", sort := "Stars") -> void:
 	if search.strip_edges() != "":
 		q = search.strip_edges().uri_encode() + "+" + q
 	var api_sort: String = {"Stars": "&sort=stars&order=desc", "Date": "&sort=updated&order=desc"}.get(sort, "")
-	_http_get(API + "/search/repositories?q=%s%s&per_page=40" % [q, api_sort], func(ok: bool, data):
+	_http_get(api + "/search/repositories?q=%s%s&per_page=40" % [q, api_sort], func(ok: bool, data):
 		if not ok or not data is Dictionary:
 			done.call([], "Couldn't reach GitHub")
 			return
@@ -387,7 +545,7 @@ func _count_downloads(list: Array, i: int, then: Callable) -> void:
 	if i >= mini(list.size(), 20):
 		then.call()
 		return
-	_http_get(API + "/repos/%s/releases?per_page=10" % list[i].full_name, func(ok: bool, data):
+	_http_get(api + "/repos/%s/releases?per_page=10" % list[i].full_name, func(ok: bool, data):
 		var n := 0
 		if ok and data is Array:
 			for rel in data:
@@ -400,35 +558,28 @@ func _count_downloads(list: Array, i: int, then: Callable) -> void:
 ## Downloads the mod pack of a repository's latest release and installs it.
 ## `done` gets an error message, or "".
 func install_from_repo(full_name: String, done: Callable) -> void:
-	_http_get(API + "/repos/%s/releases/latest" % full_name, func(ok: bool, data):
+	_http_get(api + "/repos/%s/releases/latest" % full_name, func(ok: bool, data):
 		if not ok or not data is Dictionary:
 			done.call("No release to download in %s" % full_name)
 			return
-		var asset = null
-		for a in data.get("assets", []):
-			if str(a.get("name", "")).get_extension().to_lower() in ["pck", "zip"]:
-				asset = a
-				break
+		var asset = _pack_asset(data)
 		if asset == null:
 			done.call("Its latest release has no mod pack (.pck)")
 			return
-		DirAccess.make_dir_recursive_absolute(DIR)
 		var file := DIR.path_join(str(asset.name).get_file())
-		var req := HTTPRequest.new()
-		req.download_file = file
-		req.timeout = 120.0
-		add_child(req)
-		req.request_completed.connect(func(result: int, code: int, _h, _b):
-			req.queue_free()
-			if result != HTTPRequest.RESULT_SUCCESS or code != 200:
-				DirAccess.remove_absolute(file)
+		_remember_source(file, full_name)
+		# Already loaded (another version): it can only be replaced at the next start.
+		var loaded := _mounted.has(file)
+		_download(str(asset.browser_download_url), UPDATE_DIR.path_join(file.get_file()) if loaded else file, func(ok: bool):
+			if not ok:
 				done.call("The download didn't work")
-				return
-			done.call(_load_installed(file))
-		)
-		if req.request(str(asset.browser_download_url), ["User-Agent: BotParty", "Accept: application/octet-stream"]) != OK:
-			req.queue_free()
-			done.call("The download didn't work")
+			elif loaded:
+				needs_restart = true
+				updates.erase(_pack_id(file))
+				updates_changed.emit()
+				done.call("")
+			else:
+				done.call(_load_installed(file)))
 	)
 
 

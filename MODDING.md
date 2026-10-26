@@ -396,6 +396,11 @@ the pack with the game's own packer and publishes the release.
 
 The repository's name, description and stars show in the list.
 
+**Updates.** Players who installed your mod from Explore are told when a newer
+release is out (Mods > Update): raise `version` in `mod.json` and make a release
+whose tag is that version (`v1.1`). A pack that's already loaded is replaced
+when the game restarts, and the game offers to restart.
+
 ## Licenses
 
 Your mods are yours: share them under any license you like (or none).
