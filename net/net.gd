@@ -238,6 +238,7 @@ func host(public: bool) -> Error:
 	if public:
 		_register(port)
 	hosted_port = port
+	_open_router(port)
 	status.emit("Hosting on port %d" % port)
 	roster_changed.emit()
 	return OK
@@ -260,6 +261,9 @@ func _register(port: int) -> void:
 		var relay_ip := IP.resolve_hostname(LobbyApi.host_of(lobby_url), IP.TYPE_IPV4)
 		if relay_ip != "" and data.has("relay_port"):
 			_relay_host = RelayHost.new(relay_ip, int(data.relay_port), data.id, data.token, port)
+			_relay_host.game_send = func(to_ip: String, to_port: int, bytes: PackedByteArray):
+				if _peer and _peer.host and is_host() and (not to_ip.contains(":") or my_ipv6() != ""):
+					_peer.host.socket_send(to_ip, to_port, bytes)
 	)
 
 
@@ -594,6 +598,50 @@ func _keyboard(local: int) -> PackedByteArray:
 	return v
 
 
+# --- UPnP: asking the router to open our port (most home routers can) -----------
+
+var upnp_address := ""   # host: our public IPv4 when the router opened the port
+var _upnp: UPNP = null
+var _upnp_thread: Thread = null
+
+
+## Host: asks the router (in the background) to send UDP `port` to us, so
+## friends can join by address. Nothing happens if the router can't.
+func _open_router(port: int) -> void:
+	if DisplayServer.get_name() == "headless" or OS.has_feature("web") or _upnp_thread:
+		return
+	upnp_address = ""
+	_upnp_thread = Thread.new()
+	_upnp_thread.start(func():
+		var u := UPNP.new()
+		var ok := u.discover(2000, 2, "InternetGatewayDevice") == OK and u.get_gateway() != null \
+			and u.get_gateway().is_valid_gateway() \
+			and u.add_port_mapping(port, port, "Bot Party", "UDP", 0) == UPNP.UPNP_RESULT_SUCCESS
+		var ext := u.query_external_address() if ok else ""
+		_router_opened.call_deferred(u if ok else null, ext, port))
+
+
+func _router_opened(u: UPNP, ext: String, port: int) -> void:
+	if _upnp_thread:
+		_upnp_thread.wait_to_finish()
+		_upnp_thread = null
+	if u == null:
+		return
+	if not is_host() or hosted_port != port:
+		_close_router(u, port)  # stopped hosting meanwhile
+		return
+	_upnp = u
+	upnp_address = ext
+	status.emit("Router opened port %d by itself (UPnP)" % port)
+
+
+func _close_router(u: UPNP, port: int) -> void:
+	var t := Thread.new()
+	t.start(func(): u.delete_port_mapping(port, "UDP"))
+	# Let it run; joined later (never blocks the game).
+	get_tree().create_timer(5.0).timeout.connect(func(): t.wait_to_finish())
+
+
 ## Client: how we're connected ("direct, IPv6, 24 ms", "relay, 310 ms").
 func connection_text() -> String:
 	if not is_client() or _peer == null:
@@ -716,13 +764,49 @@ func join_listed(entry: Dictionary, my_public_ip: String) -> void:
 			tries.append([str(entry.ip6), port])
 		if ip != "" and entry.get("direct", true):
 			tries.append([ip, port])
+	for t in tries:
+		t.append("Connecting to %s%s..." % [entry.name, " (IPv6)" if str(t[0]).contains(":") else ""])
+	# Through the host's router without anyone setting it up: first ask the relay
+	# to introduce us (hole punching), then the plain tries, then the relay.
+	var relay_ip := IP.resolve_hostname(LobbyApi.host_of(lobby_url), IP.TYPE_IPV4) if entry.get("relay", false) else ""
+	if relay_ip != "" and not (ip == my_public_ip and entry.get("lan_ip", "") != ""):
+		_punch = HolePunch.new(relay_ip, int(entry.relay_port), str(entry.id), my_ipv6())
+		_punch_name = str(entry.name)
+		_next_direct = tries
+		status.emit("Connecting to %s..." % entry.name)
+		return
 	if tries.is_empty():
 		_join_relay()
 		return
-	for t in tries:
-		t.append("Connecting to %s%s..." % [entry.name, " (IPv6)" if str(t[0]).contains(":") else ""])
 	_next_direct = tries.slice(1)
 	_start_client(tries[0][0], tries[0][1], tries[0][2])
+
+
+var _punch: HolePunch = null
+var _punch_name := ""
+
+
+## Client: the relay answered (or not): connect from the punched port, the
+## plain addresses after, the relay last.
+func _punch_done() -> void:
+	var info := _punch.info
+	var lp := _punch.local_port
+	_punch = null
+	var tries := []
+	if info.get("ok", false):
+		if str(info.get("ip6", "")) != "" and my_ipv6() != "":
+			tries.append([str(info.ip6), int(info.get("port6", 0)), "Connecting to %s (IPv6)..." % _punch_name, lp])
+		if str(info.get("ip", "")) != "":
+			tries.append([str(info.ip), int(info.get("port", 0)), "Connecting to %s..." % _punch_name, lp])
+	for t in _next_direct:
+		if not tries.any(func(o): return o[0] == t[0] and o[1] == t[1]):
+			tries.append(t)
+	if tries.is_empty():
+		_join_relay()
+		return
+	_next_direct = tries.slice(1)
+	var t: Array = tries[0]
+	_start_client(t[0], t[1], t[2], t[3] if t.size() > 3 else 0)
 
 
 func _join_relay() -> void:
@@ -741,11 +825,11 @@ func _join_relay() -> void:
 	_start_client("127.0.0.1", _relay_client.local_port, "Connecting through the relay...")
 
 
-func _start_client(ip: String, port: int, text: String) -> void:
+func _start_client(ip: String, port: int, text: String, local_port := 0) -> void:
 	if _peer:
 		_peer.close()
 	_peer = ENetMultiplayerPeer.new()
-	var err := _peer.create_client(ip, port)
+	var err := _peer.create_client(ip, port, 0, 0, 0, local_port)
 	if err != OK:
 		leave()
 		failed.emit("Can't connect (%s)" % error_string(err))
@@ -777,7 +861,7 @@ func _on_connection_failed() -> void:
 		return
 	if not _next_direct.is_empty():
 		var t: Array = _next_direct.pop_front()
-		_start_client(t[0], t[1], t[2])
+		_start_client(t[0], t[1], t[2], t[3] if t.size() > 3 else 0)
 		return
 	if not _pending_relay.is_empty():
 		status.emit("Direct connection failed, trying the relay...")
@@ -986,6 +1070,13 @@ func leave() -> void:
 	_remote_last.clear()
 	_offers.clear()
 	_next_direct.clear()
+	if _upnp:
+		_close_router(_upnp, hosted_port)
+		_upnp = null
+		upnp_address = ""
+	if _punch:
+		_punch.close()
+		_punch = null
 	_sending.clear()
 	_receiving.clear()
 	_expect.clear()
@@ -1101,6 +1192,10 @@ func _scene_extra(path: String) -> Dictionary:
 # --- Per frame ---------------------------------------------------------------------
 
 func _process(_d: float) -> void:
+	if _punch:
+		_punch.poll()
+		if _punch.done:
+			_punch_done()
 	if not _held_until_seen.is_empty():
 		_release_seen_taps()
 	if is_online():

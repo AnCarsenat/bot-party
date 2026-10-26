@@ -111,16 +111,17 @@ Turn and Flip rotate and mirror items while you place them in party mode.
 ## Online
 
 - **Host public game:** your game appears on the server list, and friends join
-  from **Server list**. If they can't reach you directly, the connection goes
-  through the server's relay.
-- **Host private game:** friends use **Join by address** with your IP. They need
-  to reach UDP port 7777 on your computer: forward it on your router, or be on
-  the same network. **Online → Port** changes the port.
-- **IPv6:** if you both have IPv6 (most French home connections do), friends
-  can join with your IPv6 address: no port forwarding, just allow UDP port 7777
-  in your router's IPv6 firewall. In your game, **Your address** shows it (Jump
-  copies it). Games on the server list try IPv6 first, then IPv4, then the
-  relay. Online, the lobby's title shows how you're connected and the ping.
+  from **Server list**. Nothing to set up on anyone's router: the server
+  introduces the two computers so they connect straight to each other through
+  their routers (hole punching, IPv6 first when both have it). Only when a
+  router doesn't allow that does the game go through the server's relay, which
+  adds the trip to the server. The lobby's title shows how you're connected
+  and the ping.
+- **Host private game:** friends use **Join by address**. The game asks your
+  router to open UDP port 7777 by itself (UPnP, which most home routers do);
+  **Your address** in the lobby then shows the address to give (Jump copies
+  it). Otherwise: your IPv6 address if you both have IPv6, or the same network,
+  or forward the port on your router. **Online → Port** changes the port.
 
 The default server list is set in `project.godot` (`[bot_party]
 online/server_list`). The server is a small Python script in `server/`, and

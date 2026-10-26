@@ -728,8 +728,12 @@ func _address_item() -> Dictionary:
 	var lan := Net._lan_ip()
 	if lan != "":
 		lines.append("Same network: " + Net.address_text(lan, port))
-	lines.append("Otherwise your public IPv4 address, with UDP port %d open on your router." % port)
-	var best := Net.address_text(v6, port) if v6 != "" else (Net.address_text(lan, port) if lan != "" else "")
+	if Net.upnp_address != "":
+		lines.append("From anywhere (your router opened the port): " + Net.address_text(Net.upnp_address, port))
+	else:
+		lines.append("Easiest: Host public game. Friends find it in the server list, nothing to set up.")
+	var best := Net.address_text(Net.upnp_address, port) if Net.upnp_address != "" \
+		else (Net.address_text(v6, port) if v6 != "" else (Net.address_text(lan, port) if lan != "" else ""))
 	return {"text": "Your address", "info": "\n".join(lines) + ("\nJump: copy it." if best != "" else ""),
 		"on_accept": func():
 			if best != "":

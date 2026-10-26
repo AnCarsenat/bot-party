@@ -8,6 +8,9 @@
      GET  /api/servers                                              -> {you, relay_port, servers: [...]}
   Relay (UDP, default 8911): forwards game traffic for players who can't reach
   the host directly (see net/relay.gd in the game for the packet format).
+  It also introduces clients and hosts to each other so they can connect
+  directly through their routers ("hole punching", see net/hole_punch.gd): the
+  relay is only for routers where that doesn't work.
 
 Run:   python3 lobby_server.py [--http-port 8910] [--relay-port 8911]
 Open TCP 8910 and UDP 8911 on the VPS firewall.
@@ -22,6 +25,7 @@ import struct
 import time
 
 HELLO_HOST, HELLO_CLIENT, JOIN, LEFT, ACK = 0x01, 0x02, 0x03, 0x04, 0x05
+PUNCH_HOST, PUNCH_CLIENT, PUNCH_INFO, PUNCH_TO = 0x06, 0x07, 0x08, 0x09
 TO_CLIENT, TO_HOST = 0x10, 0x11
 
 HOST_TIMEOUT = 30.0      # unlisted if no heartbeat for this long
@@ -54,6 +58,7 @@ class Server:
         self.id, self.token, self.ip = sid, token, ip
         self.info = info
         self.seen = time.monotonic()
+        self.game_addr = None           # host's game socket as the internet sees it
         self.relay_addr = None          # host's UDP address on the relay
         self.clients = {}               # cid -> client addr
         self.next_cid = 1
@@ -146,6 +151,25 @@ class Lobby:
                 s.relay_addr = addr
                 s.seen = time.monotonic()
                 self.relay.sendto(bytes([ACK]), addr)
+        elif kind == PUNCH_HOST and len(data) >= 25:
+            # From the host's game socket (no answer: it's the game's own socket).
+            s = self.servers.get(data[1:9].decode("ascii", "replace"))
+            if s and s.token == data[9:25].decode("ascii", "replace"):
+                s.game_addr = addr
+        elif kind == PUNCH_CLIENT and len(data) >= 11:
+            # A client wants to connect straight to a host: tell each where the
+            # other is, and both send packets to each other to open their routers.
+            s = self.servers.get(data[1:9].decode("ascii", "replace"))
+            local_port = struct.unpack(">H", data[9:11])[0]
+            ip6 = clean_ip6(data[11:60].decode("ascii", "replace"))
+            if not s or not s.game_addr or not s.relay_addr:
+                self.relay.sendto(bytes([PUNCH_INFO]) + json.dumps({"ok": False}).encode(), addr)
+                return
+            self.relay.sendto(bytes([PUNCH_INFO]) + json.dumps({
+                "ok": True, "ip": s.game_addr[0], "port": s.game_addr[1],
+                "ip6": s.info.get("ip6", ""), "port6": s.info["port"]}).encode(), addr)
+            self.relay.sendto(bytes([PUNCH_TO]) + json.dumps({
+                "ip": addr[0], "port": addr[1], "ip6": ip6, "port6": local_port}).encode(), s.relay_addr)
         elif kind == HELLO_CLIENT and len(data) >= 9:
             s = self.servers.get(data[1:9].decode("ascii", "replace"))
             if not s or not s.relay_addr:
