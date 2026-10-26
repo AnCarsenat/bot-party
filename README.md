@@ -102,7 +102,9 @@ Turn and Flip rotate and mirror items while you place them in party mode.
   for each party (normal, trapper, builder or chaos).
 - **Party rules:** **Party → Rules** sets the game mode, the winning score, the
   round time, coins, surprise rules, how often Special crates show up, and item
-  odds. **Party → Items** turns items on and off, special ones included.
+  odds. Each mode keeps its own rules (modes from mods add theirs, like the
+  Auction mode's rounds and coins). **Party → Items** turns items on and off,
+  special ones included.
 - **Settings → Screen shake** turns off the shake of explosions.
 - **Console:** ² or F1 (`help` lists the commands). It has cheats, `keys` (shows
   which keys the game receives), `savestate` / `loadstate`, and `inspect` (an

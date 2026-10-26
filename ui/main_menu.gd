@@ -240,22 +240,34 @@ func _show(screen: String, keep_index := false) -> void:
 			_items.append({"text": "Mode", "info": "How the party is played.\n" + str(Party.modes().get(r.mode, {}).get("description", "")),
 				"value": func(): return "< %s >" % str(Party.modes().get(r.mode, {"name": "Classic"}).name).left(14),
 				"on_left": func(): _cycle_mode(-1), "on_right": func(): _cycle_mode(1), "on_accept": func(): _cycle_mode(1)})
-			_items.append({"text": "First to", "info": "Points needed to win the party.",
-				"value": func(): return "< %d >" % r.target,
-				"on_left": func(): step.call("target", -10, 10, 300), "on_right": func(): step.call("target", 10, 10, 300),
-				"on_accept": func(): step.call("target", 10, 10, 300)})
-			_items.append({"text": "Round time", "info": "Seconds to reach the flag. Arena: each arena's own time.",
-				"value": func(): return "< %s >" % ("Arena" if r.round_time == 0 else "%d s" % r.round_time),
-				"on_left": func(): step.call("round_time", -10, 0, 180), "on_right": func(): step.call("round_time", 10, 0, 180),
-				"on_accept": func(): step.call("round_time", 10, 0, 180)})
-			_items.append({"text": "Coins", "info": "A coin to grab on the way: bonus points if you reach the flag with it.",
-				"value": func(): return onoff.call("coins"), "on_left": func(): flip.call("coins"), "on_right": func(): flip.call("coins"), "on_accept": func(): flip.call("coins")})
-			_items.append({"text": "Surprises", "info": "Some rounds get a surprise rule (low gravity, speedy...).",
-				"value": func(): return onoff.call("surprises"), "on_left": func(): flip.call("surprises"), "on_right": func(): flip.call("surprises"), "on_accept": func(): flip.call("surprises")})
-			_items.append({"text": "Equal odds", "info": "Every item that's on is as likely as the others (ignores Party > Items odds).",
-				"value": func(): return onoff.call("equal_odds"), "on_left": func(): flip.call("equal_odds"), "on_right": func(): flip.call("equal_odds"), "on_accept": func(): flip.call("equal_odds")})
-			_items.append({"text": "Reset", "info": "Back to the usual rules.", "on_accept": func():
-				Party.rules = Party.RULE_DEFAULTS.duplicate(); Party.save_weights(); _show("party_rules", true)})
+			var m := Party.mode_info(str(r.mode))
+			var hidden: Array = m.hidden_rules
+			if not "target" in hidden:
+				_items.append({"text": "First to", "info": "Points needed to win the party.",
+					"value": func(): return "< %d >" % r.target,
+					"on_left": func(): step.call("target", -10, 10, 300), "on_right": func(): step.call("target", 10, 10, 300),
+					"on_accept": func(): step.call("target", 10, 10, 300)})
+			if not "round_time" in hidden:
+				_items.append({"text": "Round time", "info": "Seconds to reach the flag. Arena: each arena's own time.",
+					"value": func(): return "< %s >" % ("Arena" if r.round_time == 0 else "%d s" % r.round_time),
+					"on_left": func(): step.call("round_time", -10, 0, 180), "on_right": func(): step.call("round_time", 10, 0, 180),
+					"on_accept": func(): step.call("round_time", 10, 0, 180)})
+			if not "coins" in hidden:
+				_items.append({"text": "Coins", "info": "A coin to grab on the way: bonus points if you reach the flag with it.",
+					"value": func(): return onoff.call("coins"), "on_left": func(): flip.call("coins"), "on_right": func(): flip.call("coins"), "on_accept": func(): flip.call("coins")})
+			if not "surprises" in hidden:
+				_items.append({"text": "Surprises", "info": "Some rounds get a surprise rule (low gravity, speedy...).",
+					"value": func(): return onoff.call("surprises"), "on_left": func(): flip.call("surprises"), "on_right": func(): flip.call("surprises"), "on_accept": func(): flip.call("surprises")})
+			if not "equal_odds" in hidden:
+				_items.append({"text": "Equal odds", "info": "Every item that's on is as likely as the others (ignores Party > Items odds).",
+					"value": func(): return onoff.call("equal_odds"), "on_left": func(): flip.call("equal_odds"), "on_right": func(): flip.call("equal_odds"), "on_accept": func(): flip.call("equal_odds")})
+			# The mode's own rules.
+			for d in m.rule_defs():
+				var when: Dictionary = d.get("when", {})  # only shown with these other rules
+				if when.keys().all(func(k): return Party.rules.get(k) == when[k]):
+					_items.append(_mode_rule_item(d))
+			_items.append({"text": "Reset", "info": "Back to this mode's usual rules.", "on_accept": func():
+				Party.reset_rules(); _show("party_rules", true)})
 			_items.append({"text": "Back", "on_accept": func(): _back()})
 		"party_items":
 			# Two groups: the usual items (the % is their share of the box), then the
@@ -963,11 +975,46 @@ func _mod_info(mod: Dictionary) -> String:
 	return "\n".join(lines)
 
 
+## Party > Rules: one of the mode's own rules (PartyMode.rule_defs()).
+func _mode_rule_item(d: Dictionary) -> Dictionary:
+	var key := str(d.key)
+	var r: Dictionary = Party.rules
+	if not r.has(key):
+		r[key] = d.get("default", 0)
+	var change: Callable
+	var shown: Callable
+	if d.has("choices"):
+		var choices: Array = d.choices
+		change = func(dir: int):
+			var i := maxi(0, choices.map(func(c): return c[0]).find(r[key]))
+			r[key] = choices[posmod(i + dir, choices.size())][0]
+		shown = func():
+			for c in choices:
+				if c[0] == r[key]:
+					return str(c[1])
+			return str(r[key])
+	elif d.get("default") is bool:
+		change = func(_dir: int): r[key] = not r[key]
+		shown = func(): return "On" if r[key] else "Off"
+	else:
+		var lo := int(d.get("min", 0))
+		var hi := int(d.get("max", 1000))
+		var st := int(d.get("step", 1))
+		change = func(dir: int): r[key] = clampi(int(r[key]) + dir * st, lo, hi)
+		shown = func(): return str(int(r[key])) + str(d.get("unit", ""))
+	var apply := func(dir: int):
+		change.call(dir)
+		Party.save_weights()
+		_show("party_rules", true)  # (a rule can show or hide others)
+	return {"text": str(d.get("name", key)).left(14), "info": str(d.get("info", "")),
+		"value": func(): return "< %s >" % shown.call(),
+		"on_left": func(): apply.call(-1), "on_right": func(): apply.call(1), "on_accept": func(): apply.call(1)}
+
+
 func _cycle_mode(step: int) -> void:
 	var ids := Party.modes().keys()
 	var i := maxi(0, ids.find(Party.rules.mode))
-	Party.rules.mode = ids[posmod(i + step, ids.size())]
-	Party.save_weights()
+	Party.set_mode(ids[posmod(i + step, ids.size())])  # its own rules come out
 	_show("party_rules", true)
 
 

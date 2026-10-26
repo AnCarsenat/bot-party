@@ -30,6 +30,10 @@ var turns := {}        # slot -> quarter turns (0-3) of the item being placed
 var mirrors := {}      # slot -> mirrored?
 var players := {}      # slot -> player
 var finished: Array[int] = []
+## Who races this round (everyone, unless a mode says otherwise: in Auction the
+## level's owner watches).
+var runners: Array[int] = []
+var _card_queue := {}  # slot -> item ids still to place after this one (place_cards)
 var _skip_when_running := false
 ## How this party is played (Party > Rules > Mode; mods can add modes).
 var mode: PartyMode
@@ -97,6 +101,71 @@ func _ready() -> void:
 	_preview.ctl = self
 	_preview.z_index = 60
 	get_parent().add_child.call_deferred(_preview)
+	if mode.custom_flow:
+		runners.assign(slots)
+		_box_row.hide()
+		mode.start_level.call_deferred(self)  # (the arena is still being set up)
+	else:
+		_start_pick()
+
+
+# --- For modes that run the party themselves (custom_flow) -----------------------
+
+## Each player places these items, one after another: {slot: [item ids]}.
+## Racing starts when everything is placed (right away if there's nothing).
+func place_cards(cards: Dictionary) -> void:
+	phase = Phase.PLACE
+	_box_row.hide()
+	_scoreboard.hide()
+	_sub.text = "Place"
+	_banner.text = ""
+	ghosts.clear()
+	turns.clear()
+	mirrors.clear()
+	_card_queue.clear()
+	var i := 0
+	for slot in cards:
+		var ids: Array = cards[slot].duplicate()
+		if ids.is_empty() or not slot in slots:
+			continue
+		_card_queue[slot] = ids
+		_next_card(slot, _ghost_start(i))
+		i += 1
+	if ghosts.is_empty():
+		_start_countdown()
+
+
+func _next_card(slot: int, at: Vector2) -> void:
+	var ids: Array = _card_queue.get(slot, [])
+	if ids.is_empty():
+		_card_queue.erase(slot)
+		return
+	var id := _open_card(str(ids.pop_front()))
+	if ids.is_empty():
+		_card_queue.erase(slot)  # the last one
+	turns[slot] = 0
+	mirrors[slot] = false
+	var g := _make_ghost(id, slot)
+	g.position = at
+	cursor[slot] = at
+	snapped.erase(slot)
+	_items.add_child(g)
+	ghosts[slot] = g
+	if follow_camera:
+		g.add_to_group("camera_follow")
+
+
+## Items `slot` still has to place after the one in hand.
+func cards_left(slot: int) -> int:
+	return _card_queue.get(slot, []).size()
+
+
+func start_countdown() -> void:
+	_start_countdown()
+
+
+## The usual round: the card box, then placing, racing and scores.
+func start_pick() -> void:
 	_start_pick()
 
 
@@ -326,7 +395,7 @@ func net_apply(d: Dictionary) -> void:
 	if d.has("sb") and d.sb != _last_scoreboard:
 		_last_scoreboard = d.sb
 		if not d.sb.is_empty():
-			_show_scoreboard(d.sb[0], d.sb[1])
+			_show_scoreboard(d.sb[0], d.sb[1], str(d.sb[2]) if d.sb.size() > 3 else "", int(d.sb[3]) if d.sb.size() > 3 else 0)
 
 
 ## Host: someone left (or was sent out) in the middle of a party: their places
@@ -766,6 +835,7 @@ func _start_pick() -> void:
 			item.reset_round()
 	_last_scoreboard = []
 	_clear_players()
+	runners.assign(slots)
 	_set_title("Party, round %d" % Party.session.round)
 	_banner.text = "Round %d" % Party.session.round
 	_sub.text = "Pick"
@@ -924,6 +994,8 @@ func _place(slot: int) -> void:
 	var pos := g.global_position
 	g.queue_free()
 	ghosts[slot] = null
+	if _card_queue.has(slot):
+		_next_card.call_deferred(slot, cursor.get(slot, pos))  # their next item, where this one went
 	if Party.ITEMS[id].get("black_hole", false):
 		_black_hole(pos, float(Party.ITEMS[id].radius))
 	elif Party.ITEMS[id].get("bomb", false):
@@ -963,14 +1035,16 @@ func _start_countdown() -> void:
 	elif Party.session.round > 1 and Party.rule("surprises") and _rng.randf() < 0.3:
 		var names := Party.MODIFIERS.keys()
 		modifier = names[_rng.randi_range(0, names.size() - 1)]
-	for i in slots.size():
+	if runners.is_empty():
+		runners.assign(slots)
+	for i in runners.size():
 		var pos := spawn_origin + Vector2((i % 4) * 80.0, -(i / 4) * 100.0)
-		var p := _spawner.spawn(slots[i], pos, slots.size() > 1)
+		var p := _spawner.spawn(runners[i], pos, slots.size() > 1)
 		p.set_ghostly(true)  # party: run through each other, no standing on heads
-		if Party.bots().has(slots[i]) and p.has_node("Tag"):
-			p.get_node("Tag").text = Party.label(slots[i])
+		if Party.bots().has(runners[i]) and p.has_node("Tag"):
+			p.get_node("Tag").text = Party.label(runners[i])
 		p.set_physics_process(false)
-		players[slots[i]] = p
+		players[runners[i]] = p
 		if modifier != "":
 			for k in Party.MODIFIERS[modifier]:
 				p.set(k, p.get(k) * Party.MODIFIERS[modifier][k])
@@ -1036,9 +1110,17 @@ func _start_score() -> void:
 		Party.session.scores[str(s)] = Party.score(s) + gains[s]
 	Party.session.round += 1
 	Party.save()
-	_last_scoreboard = [old, gains]
-	_show_scoreboard(old, gains)
+	var heading := mode.goal_text()
+	if heading == "":
+		heading = "First to %d points wins" % Party.target_score()
+	var goal := mode.score_goal()
+	if goal <= 0:
+		goal = Party.target_score()
+	_last_scoreboard = [old, gains, heading, goal]
+	_show_scoreboard(old, gains, heading, goal)
 	await get_tree().create_timer(3.5).timeout
+	if mode.after_score(self):
+		return  # the mode takes it from here
 
 	var best := -1
 	var winner := 0
@@ -1124,7 +1206,7 @@ func _process_place(delta: float) -> void:
 			continue
 		all_done = false
 		_steer_ghost(slot, g, delta)
-	if all_done and _busy == 0:
+	if all_done and _busy == 0 and _card_queue.is_empty():
 		_start_countdown()
 
 
@@ -1304,7 +1386,7 @@ func _update_ghost_tags() -> void:
 			tag.add_child(chip)
 			var keys := Label.new()
 			var k := Net.local_keys_for(slot)
-			if k != 0:
+			if k != 0 and not Party.bots().has(slot):
 				keys.text = "%s turn  %s flip" % [UiTheme.action_key_text(k, 2), UiTheme.action_key_text(k, 3)]
 			keys.add_theme_font_size_override("font_size", 14)
 			keys.add_theme_color_override("font_outline_color", UiTheme.MARBLE)
@@ -1499,7 +1581,11 @@ func _add_tag(parent: Control, slot: int, text: String) -> void:
 	parent.add_child(l)
 
 
-func _show_scoreboard(old: Dictionary, gains: Dictionary) -> void:
+func _show_scoreboard(old: Dictionary, gains: Dictionary, heading := "", goal := 0) -> void:
+	if heading == "":
+		heading = "First to %d points wins" % Party.target_score()
+	if goal <= 0:
+		goal = Party.target_score()
 	for c in _scoreboard.get_children():
 		c.queue_free()
 	_scoreboard.show()
@@ -1509,7 +1595,7 @@ func _show_scoreboard(old: Dictionary, gains: Dictionary) -> void:
 	col.add_theme_constant_override("separation", 10)
 	panel.add_child(col)
 	var head := Label.new()
-	head.text = "First to %d points wins" % Party.target_score()
+	head.text = heading
 	head.add_theme_color_override("font_color", UiTheme.MUTED)
 	col.add_child(head)
 	for s in slots:
@@ -1529,13 +1615,13 @@ func _show_scoreboard(old: Dictionary, gains: Dictionary) -> void:
 		var bar := ColorRect.new()
 		bar.color = PlayerSpawner.COLORS[(s - 1) % 8]
 		bar.position = Vector2(3, 3)
-		bar.size = Vector2(434.0 * minf(1.0, float(old[s]) / Party.target_score()), 24)
+		bar.size = Vector2(434.0 * minf(1.0, float(old[s]) / goal), 24)
 		bar_bg.add_child(bar)
-		var target := 434.0 * minf(1.0, float(Party.score(s)) / Party.target_score())
+		var target := 434.0 * minf(1.0, float(Party.score(s)) / goal)
 		bar.create_tween().tween_property(bar, "size:x", target, 0.8).set_delay(0.4)
 		var pts := Label.new()
 		pts.add_theme_font_override("font", UiTheme.FONT_BOLD)
-		pts.text = "%d  %s" % [Party.score(s), ("+%d" % gains[s]) if gains[s] > 0 else ""]
+		pts.text = "%d  %s" % [Party.score(s), ("+%d" % gains[s]) if gains[s] > 0 else (("%d" % gains[s]) if gains[s] < 0 else "")]
 		row.add_child(pts)
 		col.add_child(row)
 

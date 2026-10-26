@@ -296,8 +296,43 @@ set `custom_pick = true`, then `pick_started(ctl)` runs when the box is filled
 and `process_pick(ctl, delta)` every frame of picking. It fills `ctl.picks`
 (slot -> card index in `ctl.box`), can read `ctl.cursors` (the card each player
 stands on) and `ctl.pressed(slot, "action_1")`, calls `ctl.update_box()` after
-changes, and `ctl.start_place()` when done. [Auction](https://github.com/AnCarsenat/bot-party-auction)'s `auction.gd` does this. Online, everyone needs a mod that adds modes, like mods
-that add items.
+changes, and `ctl.start_place()` when done. Online, everyone needs a mod that
+adds modes, like mods that add items.
+
+**Rules.** Each mode has its own rules in **Party > Rules** (changing the mode
+brings out its rules, and keeps the other mode's for later). A mode can hide
+standard rules it doesn't use (`hidden_rules = ["target", "coins"]`), give them
+other defaults (`rule_defaults()` returns `{"round_time": 40}`), and add its own
+with `rule_defs()`:
+
+```gdscript
+func rule_defs() -> Array:
+	return [
+		{"key": "lives", "name": "Lives", "default": 3, "min": 1, "max": 9, "info": "Shown in the menu."},
+		{"key": "sudden", "name": "Sudden death", "default": false},
+		{"key": "ends", "name": "Ends", "default": "rounds", "choices": [["rounds", "After rounds"], ["score", "At a score"]]},
+		{"key": "rounds", "name": "Rounds", "default": 5, "min": 1, "max": 20, "when": {"ends": "rounds"}},
+	]
+```
+
+Read them with `Party.rule("lives")`.
+
+**A whole different party.** With `custom_flow = true` the mode runs the party
+itself instead of the card box:
+
+- `party_started(session)`: a new party; change `Party.session` as you like
+  (`session.arena` is the first scene, which can be a scene of your mod).
+- `start_level(ctl)`: an arena is loaded. Set `ctl.runners` (who races; the
+  others watch), then `ctl.place_cards({slot: [item ids]})` (each player places
+  those, one after another; the race starts when all are placed).
+- `score_round(ctl, gains)`: change the points (they can be negative).
+- `after_score(ctl)`: return `true` to decide what comes next yourself (another
+  scene with `Transition.change_scene`, or `Party.end_game(message)`).
+- `goal_text()` and `score_goal()`: the scoreboard's heading and its bars' scale.
+
+[Auction](https://github.com/AnCarsenat/bot-party-auction) does all of this:
+everyone gets a level of their own, items are sold in an auction room (a scene
+of the mod), and the levels are raced one after another.
 
 ### Looks
 

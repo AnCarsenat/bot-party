@@ -9,7 +9,9 @@ const RULE_DEFAULTS := {"target": 50, "round_time": 0, "coins": true, "surprises
 ## Chance that a card in the box is a Special crate, for the "specials" rule (off, rare, often).
 const SPECIAL_ODDS := [0.0, 0.04, 0.12]
 const SPECIAL_NAMES := ["Off", "Rare", "Often"]
+## The rules of the selected mode (Party > Rules). Each mode keeps its own set.
 var rules := RULE_DEFAULTS.duplicate()
+var rulesets := {}   # mode id -> its rules (the others than the selected one)
 const SAVE_PATH := "user://party_session.json"
 ## Arenas a party can be played in (one is picked at random for each new party).
 const ARENAS := ["res://party/party_arena.tscn", "res://party/party_arena_2.tscn",
@@ -90,6 +92,7 @@ func _ready() -> void:
 ## Items from mods come and go with their on/off switch.
 func reload_items() -> void:
 	_arena_cache = []  # mod maps may have come or gone
+	_mode_cache.clear()  # and modes
 	ITEMS = BUILT_IN_ITEMS.duplicate(true)
 	var mods := get_node_or_null("/root/Mods")
 	if mods:
@@ -202,11 +205,65 @@ func make_mode(id: String) -> PartyMode:
 
 ## A rule of the party being played (or of the next one, between parties).
 func rule(name: String):
-	return session.get("rules", rules).get(name, RULE_DEFAULTS[name])
+	var r: Dictionary = session.get("rules", rules)
+	if r.has(name):
+		return r[name]
+	return default_rules(str(r.get("mode", "classic"))).get(name, RULE_DEFAULTS.get(name))
+
+
+var _mode_cache := {}  # mode id -> a PartyMode (for its rule definitions)
+
+## A mode, to ask about its rules (not one playing).
+func mode_info(id: String) -> PartyMode:
+	if not _mode_cache.has(id):
+		_mode_cache[id] = make_mode(id)
+	return _mode_cache[id]
+
+
+## A mode's rules as they are before anyone changes them.
+func default_rules(id: String) -> Dictionary:
+	var r := RULE_DEFAULTS.duplicate()
+	var m := mode_info(id)
+	r.merge(m.rule_defaults(), true)
+	for d in m.rule_defs():
+		r[str(d.key)] = d.get("default", 0)
+	r.mode = id
+	return r
+
+
+## Switches Party > Rules to another mode: the current rules are kept for when
+## it comes back, the new mode's own come out.
+func set_mode(id: String) -> void:
+	rulesets[str(rules.mode)] = rules.duplicate()
+	var r: Dictionary = default_rules(id)
+	r.merge(rulesets.get(id, {}), true)
+	r.mode = id
+	rules = r
+	save_weights()
+
+
+func reset_rules() -> void:
+	rules = default_rules(str(rules.mode))
+	rulesets.erase(str(rules.mode))
+	save_weights()
 
 
 func target_score() -> int:
 	return int(rule("target"))
+
+
+## The arena of a new party, picked like Party > Arena says (for modes that
+## play several arenas): [scene path, map or {}].
+func random_arena() -> Array:
+	var opts := arena_options().filter(func(o): return o.id != "random")
+	if opts.is_empty():
+		return [ARENAS[randi() % ARENAS.size()], {}]
+	var o: Dictionary = opts[randi() % opts.size()]
+	if str(o.id).begins_with("map:"):
+		var m := ArenaMap.load_file(str(o.id).trim_prefix("map:"))
+		if not m.is_empty():
+			return [ArenaMap.SCENE, m]
+	return [str(o.id) if str(o.id) in ARENAS else ARENAS[randi() % ARENAS.size()], {}]
 
 
 func save_weights() -> void:
@@ -220,6 +277,9 @@ func save_weights() -> void:
 	cfg.set_value("party", "bot_list", list)
 	for k in rules:
 		cfg.set_value("rules", k, rules[k])
+	var sets := rulesets.duplicate()
+	sets[str(rules.mode)] = rules.duplicate()
+	cfg.set_value("party", "rulesets", sets)
 	cfg.save(ITEMS_PATH)
 
 
@@ -238,6 +298,14 @@ func load_weights() -> void:
 			_fill_bots(int(cfg.get_value("party", "bots", 0)), int(cfg.get_value("party", "bot_skill", 1)))
 		for k in RULE_DEFAULTS:
 			rules[k] = type_convert(cfg.get_value("rules", k, RULE_DEFAULTS[k]), typeof(RULE_DEFAULTS[k]))
+		var sets = cfg.get_value("party", "rulesets", {}) if cfg.has_section_key("party", "rulesets") else {}
+		rulesets = sets if sets is Dictionary else {}
+		# The selected mode's own rules (a mod's) come back too.
+		var mine = rulesets.get(str(rules.mode), {})
+		if mine is Dictionary:
+			for k in mine:
+				if not RULE_DEFAULTS.has(k):
+					rules[k] = mine[k]
 	if cfg.load(ITEMS_PATH) == OK and cfg.has_section("weights"):
 		for k in cfg.get_section_keys("weights"):
 			if ITEMS.has(k):
@@ -257,7 +325,9 @@ func new_session(players: Array, choice := "") -> void:
 	var scores := {}
 	for s in players:
 		scores[str(s)] = 0
-	session = {"round": 1, "scores": scores, "players": players.duplicate(), "items": [], "rules": rules.duplicate(),
+	var r := default_rules(str(rules.mode))
+	r.merge(rules, true)  # (rules added to the mode since they were saved)
+	session = {"round": 1, "scores": scores, "players": players.duplicate(), "items": [], "rules": r,
 		"arena": ARENAS[randi() % ARENAS.size()]}
 	# Bots, in their own slots. Each gets a way of playing for this party.
 	var bots := {}
@@ -290,6 +360,7 @@ func new_session(players: Array, choice := "") -> void:
 			use_map(m)
 	elif choice in ARENAS:
 		session.arena = choice
+	make_mode(str(r.mode)).party_started(session)
 
 
 ## The party is played on a map from the editor.
@@ -297,14 +368,20 @@ func use_map(m: Dictionary) -> void:
 	session.arena = ArenaMap.SCENE
 	session.map = m
 	# Items that come with the map are there from the start (anyone's to blow up).
-	session.items = []
-	var uid := 1
+	session.items = map_items(m, 1)
+	session.next_uid = session.items.size() + 1
+
+
+## The items a map comes with, as party item records (uids from `first_uid`).
+func map_items(m: Dictionary, first_uid: int) -> Array:
+	var out := []
+	var uid := first_uid
 	for it in m.get("items", []):
 		if ITEMS.has(it.id) and not ITEMS[it.id].get("bomb", false):
-			session.items.append({"id": it.id, "x": float(it.x), "y": float(it.y), "owner": 0,
+			out.append({"id": it.id, "x": float(it.x), "y": float(it.y), "owner": 0,
 				"rot": int(it.get("rot", 0)), "mirror": bool(it.get("mirror", false)), "uid": uid})
 			uid += 1
-	session.next_uid = uid
+	return out
 
 
 ## Arena choices for the menu: [{id, name}].

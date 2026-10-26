@@ -13,6 +13,53 @@ var name := "Classic"
 var description := "Reach the flag. Traps you placed score when they get someone."
 ## True: the mode hands out the cards itself (process_pick), not first come first served.
 var custom_pick := false
+## True: the mode runs the party its own way: start_level() when an arena is
+## loaded instead of the card box (see the Auction mod).
+var custom_flow := false
+## Standard rules ("target", "round_time", "coins", "surprises", "equal_odds")
+## this mode doesn't use: Party > Rules doesn't show them.
+var hidden_rules: Array = []
+
+
+## The mode's own rules, shown in Party > Rules under the usual ones. Each:
+## {key, name, info, default, min, max, step} for numbers, {key, name, info,
+## default (true/false)} for on/off, or {key, name, info, default, choices:
+## [[value, "Shown as"], ...]}. Add "when": {other_key: value} to show a rule
+## only while another one has that value. Read them with Party.rule(key).
+func rule_defs() -> Array:
+	return []
+
+
+## Other defaults for standard rules (like {"round_time": 40}).
+func rule_defaults() -> Dictionary:
+	return {}
+
+
+## A new party (before its first scene): `session` can be changed (Party.session).
+func party_started(_session: Dictionary) -> void:
+	pass
+
+
+## custom_flow: an arena is loaded and ready (instead of the card box). Use
+## ctl.place_cards(), ctl.runners, ctl.start_countdown()...
+func start_level(_ctl: Node) -> void:
+	pass
+
+
+## The scoreboard was shown. Return true to take it from there (next scene,
+## end of the party...), false for the usual (winner check, next round).
+func after_score(_ctl: Node) -> bool:
+	return false
+
+
+## The scoreboard's heading ("" for the usual "First to N points wins").
+func goal_text() -> String:
+	return ""
+
+
+## The score the scoreboard's bars are drawn against (0: the winning score).
+func score_goal() -> int:
+	return 0
 
 
 ## The party starts (once, in the arena).

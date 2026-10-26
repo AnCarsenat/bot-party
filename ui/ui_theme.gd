@@ -111,9 +111,11 @@ static func _keys_of(n: int) -> String:
 	return ("k%d_" if online else "p%d_") % n
 
 
-## The key a player jumps with, as text ("Space", "N", "Pad 1 A").
+## The key a player jumps with, as text ("Space", "N", "Pad 1 A"; "Any pad" for
+## a player only a gamepad can take).
 static func jump_key_text(n: int) -> String:
-	return action_key_text(n, 1)
+	var t := action_key_text(n, 1)
+	return "Any pad" if t == "-" else t
 
 
 ## The key for a player's action 1, 2 or 3 ("Space", "E", "Pad 1 X", "Pad 2 B"
@@ -129,7 +131,7 @@ static func action_key_text(n: int, action: int) -> String:
 			return "Pad %d %s" % [ev.device + 1, pads.button_text(ev.device, ev.button_index)]
 	for ev in events:
 		return _event_text(ev)
-	return "Any pad"
+	return "-"
 
 
 ## Readable controls for player n (1-based), from the Input Map.

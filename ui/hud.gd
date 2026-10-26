@@ -85,7 +85,7 @@ func _to_menu() -> void:
 
 func in_level() -> bool:
 	var s := get_tree().current_scene
-	return s != null and s.has_node("Game")
+	return s != null and (s.has_node("Game") or s.is_in_group("pausable"))
 
 
 func set_paused(value: bool) -> void:
