@@ -24,8 +24,11 @@ Both use the same `mod.json`. A complete example is in
 [`mods/example/`](mods/example): a pinball bumper, a long plank, a mint coin, a
 game mode, a map file and a map scene with a windmill. Its pack, `example.pck`,
 is on the [Releases page](https://github.com/AnCarsenat/bot-party/releases), with
-two more: [`mods/hats/`](mods/hats) (six looks) and
-[`mods/auction/`](mods/auction) (a game mode where players bid for the cards).
+two more mods have repositories of their own (and show up in **Mods > Explore**):
+[Hats](https://github.com/AnCarsenat/bot-party-hats) (six looks) and
+[Auction](https://github.com/AnCarsenat/bot-party-auction) (a game mode where
+players bid for the cards). They're good starting points for a mod of your own,
+release workflow included.
 
 ## Where mods go
 
@@ -287,7 +290,7 @@ set `custom_pick = true`, then `pick_started(ctl)` runs when the box is filled
 and `process_pick(ctl, delta)` every frame of picking. It fills `ctl.picks`
 (slot -> card index in `ctl.box`), can read `ctl.cursors` (the card each player
 stands on) and `ctl.pressed(slot, "action_1")`, calls `ctl.update_box()` after
-changes, and `ctl.start_place()` when done. `mods/auction/auction.gd` does this. Online, everyone needs a mod that adds modes, like mods
+changes, and `ctl.start_place()` when done. [Auction](https://github.com/AnCarsenat/bot-party-auction)'s `auction.gd` does this. Online, everyone needs a mod that adds modes, like mods
 that add items.
 
 ### Looks
@@ -338,11 +341,17 @@ Bot Party always asks before downloading one.
 **Mods > Explore** lists GitHub repositories with the topic `bot-party-mod`. To
 be listed:
 
-1. Put your mod on GitHub, and add the topic `bot-party-mod` (the gear next to
-   **About** on the repository's page).
-2. Make a release with your `.pck` attached (only the first `.pck` is used).
-   Explore installs the latest release; its downloads count for the
+1. Put your mod folder's files at the root of a GitHub repository (call it
+   `bot-party-<your mod>`: Explore leaves out the `bot-party-`), and add the
+   topic `bot-party-mod` (the gear next to **About** on the repository's page).
+2. Make a release with your `<mod id>.pck` attached (only the first `.pck` is
+   used). Explore installs the latest release; its downloads count for the
    **Downloads** sort.
+
+The easy way: copy `.github/workflows/pack.yml` from
+[bot-party-hats](https://github.com/AnCarsenat/bot-party-hats) and change
+`MOD_ID`. Then every tag you push (`git tag v1.1 && git push origin v1.1`) makes
+the pack with the game's own packer and publishes the release.
 
 The repository's name, description and stars show in the list.
 

@@ -90,13 +90,12 @@ jobs:
           cp export/macos/BotParty.zip "dist/BotParty-$N-macos.zip"
           (cp LICENSE ASSETS-LICENSE.md CREDITS.md ui/fonts/Jersey-OFL.txt export/linux/SOURCE.txt export/macos/ && cd export/macos \
             && zip -q "../../dist/BotParty-$N-macos.zip" LICENSE ASSETS-LICENSE.md CREDITS.md Jersey-OFL.txt SOURCE.txt)
-          # The mods made here, as mod packs (they go in the game's mods folder).
-          for m in example hats auction; do
-            ~/godot/godot --headless --path . --script res://editor/pack_mod.gd -- res://mods/$m dist/$m.pck
-          done
+          # The example mod, as a mod pack (it goes in the game's mods folder).
+          # Other mods (Hats, Auction...) have their own repositories and releases.
+          ~/godot/godot --headless --path . --script res://editor/pack_mod.gd -- res://mods/example dist/example.pck
           ls -la dist
           test -s "dist/BotParty-$N-linux.zip" && test -s "dist/BotParty-$N-windows.zip" && test -s "dist/BotParty-$N-macos.zip" \
-            && test -s dist/example.pck && test -s dist/hats.pck && test -s dist/auction.pck
+            && test -s dist/example.pck
 
       - name: Keep the builds (Actions > this run > Artifacts)
         uses: actions/upload-artifact@v4

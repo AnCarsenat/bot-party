@@ -313,7 +313,7 @@ func explore(done: Callable, search := "", sort := "Stars") -> void:
 			return
 		var out := []
 		for r in data.get("items", []):
-			out.append({"name": str(r.get("name", "")), "full_name": str(r.get("full_name", "")),
+			out.append({"name": _repo_title(str(r.get("name", ""))), "full_name": str(r.get("full_name", "")),
 				"description": str(r.get("description", "") if r.get("description") != null else ""),
 				"stars": int(r.get("stargazers_count", 0)), "author": str(r.get("owner", {}).get("login", "")),
 				"url": str(r.get("html_url", "")), "updated": str(r.get("pushed_at", r.get("updated_at", ""))).left(10),
@@ -331,6 +331,14 @@ func explore(done: Callable, search := "", sort := "Stars") -> void:
 			_:
 				done.call(out, "")
 	)
+
+
+## "bot-party-hats" -> "Hats".
+static func _repo_title(repo: String) -> String:
+	for prefix in ["bot-party-", "botparty-", "bot_party_"]:
+		if repo.to_lower().begins_with(prefix) and repo.length() > prefix.length():
+			repo = repo.substr(prefix.length())
+	return repo.replace("-", " ").replace("_", " ").capitalize() if repo == repo.to_lower() else repo
 
 
 func _count_downloads(list: Array, i: int, then: Callable) -> void:

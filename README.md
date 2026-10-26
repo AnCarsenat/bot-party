@@ -145,8 +145,9 @@ bot-party -- --help
   `editor/mod_kit.tscn`: your scenes and scripts become a mod pack (`.pck`) that
   players install from **Mods** (Explore or Browse) and switch on there. Map
   scenes in a pack can hold any Godot nodes. See [MODDING.md](MODDING.md) and the
-  examples in `mods/example`, `mods/hats` and `mods/auction` (their packs are on
-  the Releases page).
+  example in `mods/example` (its pack is on the Releases page), and the
+  [Hats](https://github.com/AnCarsenat/bot-party-hats) and
+  [Auction](https://github.com/AnCarsenat/bot-party-auction) mods.
 
 ![Map editor](docs/screenshots/editor.png)
 
