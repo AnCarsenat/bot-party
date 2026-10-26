@@ -1349,6 +1349,23 @@ func _reconcile_players(scene: Node, list: PackedInt32Array) -> void:
 			p.global_position = want[slot]
 
 
+## Client: a new robot in place of `old` (out or finished last round, back now).
+func respawn_player(old: Node, pos: Vector2) -> Node:
+	var scene := get_tree().current_scene
+	var spawner := scene.get_node_or_null("PlayerSpawner") if scene else null
+	if spawner == null or not scene.is_ancestor_of(old):
+		return null
+	var slot: int = old.get_meta("player_index", 0) + 1
+	var others := get_tree().get_nodes_in_group("players").filter(func(p): return p != old and scene.is_ancestor_of(p)).size()
+	old.remove_from_group("players")
+	old.remove_from_group("camera_follow")
+	old.name = "Gone%d" % slot  # the new one gets its name now
+	old.queue_free()
+	var p = spawner.spawn(slot, pos, others > 0)
+	p.global_position = pos
+	return p
+
+
 # --- Chat (console "say") -------------------------------------------------------------
 
 func chat(text: String) -> void:

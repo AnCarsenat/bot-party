@@ -807,7 +807,8 @@ func _start_pick() -> void:
 	_box_row.show()
 	_scoreboard.hide()
 	_update_box()
-	mode.pick_started(self)
+	if mode:
+		mode.pick_started(self)
 
 
 ## If no card in the box is of `kind` ("help" or "trap"), one card becomes one.
@@ -1063,9 +1064,11 @@ func _process(delta: float) -> void:
 	if NetCheck.client(self):
 		_client_predict(delta)  # our own cursors answer at once
 		return  # online: the host runs the rounds
+	if mode == null:
+		return  # was a client, the host just left
 	match phase:
 		Phase.PICK:
-			if mode.custom_pick:
+			if mode and mode.custom_pick:
 				mode.process_pick(self, delta)  # the mode hands the cards out (auction...)
 			else:
 				_process_pick()

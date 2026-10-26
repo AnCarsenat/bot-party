@@ -134,6 +134,14 @@ var _nudge := Vector2.ZERO    # predicted: correction still to make up
 
 func net_apply(s: Array) -> void:
 	var pos := Vector2(s[0])
+	if (get_meta("eliminated", false) and not s[6]) or (get_meta("finished", false) and not s[7]):
+		# The host has a new robot for this player (next party round): so do we.
+		# Ours was switched off when it went out, and wouldn't move or be followed.
+		var net := get_tree().root.get_node_or_null("Net")
+		var fresh: Node = net.respawn_player(self, pos) if net else null
+		if fresh:
+			fresh.net_apply(s)
+			return
 	var predicted := _predicted()
 	if s.size() > 12:
 		gravity = s[12][0]
