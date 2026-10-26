@@ -463,7 +463,7 @@ func _show(screen: String, keep_index := false) -> void:
 		"restart":
 			_items.append({"text": "Restart now", "on_accept": func(): Mods.restart(),
 				"info": "The game closes and starts again by itself (your party and settings are kept)."})
-			_items.append({"text": "Later", "on_accept": func(): _show("mods"),
+			_items.append({"text": "Later", "on_accept": func(): _restart_later(),
 				"info": "The changes show the next time you start the game. Mods has a Restart now button meanwhile."})
 		"mods_explore":
 			_items.append({"text": "Search: " + (_explore_search.left(14) if _explore_search != "" else "all"), "size": 34,
@@ -961,6 +961,20 @@ func _mods_news() -> String:
 	return out
 
 
+var _restart_back := "mods"   # where Later goes
+var _asked_on_leave := false
+
+
+func _restart_later() -> void:
+	var to := _restart_back
+	_restart_back = "mods"
+	_show(to)
+	if to == "main":
+		for i in _items.size():
+			if _items[i].text == "Mods":
+				_select(i)
+
+
 ## Asks whether to restart now (some mod changes only show after a restart).
 func _ask_restart(why: String) -> void:
 	_show("restart")
@@ -1140,7 +1154,13 @@ func _back() -> void:
 		_select(2)
 		return
 	if _screen == "restart":
-		_show("mods")
+		_restart_later()
+		return
+	if _screen == "mods" and Mods.needs_restart and not _asked_on_leave:
+		# Leaving Mods with changes that need a restart: ask once more.
+		_asked_on_leave = true
+		_restart_back = "main"
+		_ask_restart("Your mod changes need a restart to show.")
 		return
 	if _screen in ["party_items", "party_rules", "controls", "mods_explore", "looks"]:
 		var text: String = {"party_items": "Items", "party_rules": "Rules", "controls": "Controls", "mods_explore": "Explore", "looks": "Looks"}[_screen]
